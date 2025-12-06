@@ -23,8 +23,10 @@ namespace StartUply.Infrastructure.Services
         {
             progressCallback?.Invoke("Preparing conversion request...", 10);
             var prompt = $"Convert this {fromDomain} project to {toDomain}. Analyze the provided code files and generate a complete {toDomain} project structure with all necessary files, including package.json, configuration files, main entry points, and proper directory structure. Provide the output as ---FILE: relative/path --- content for each file.\n{code}";
+            progressCallback?.Invoke("Analyzing code structure...", 20);
             progressCallback?.Invoke("Sending request to AI service...", 30);
-            var result = await GenerateTextAsync(prompt, progressCallback);
+            var result = await GenerateTextAsync(prompt, progressCallback, 40, 80);
+            progressCallback?.Invoke("Processing generated files...", 90);
             progressCallback?.Invoke("Conversion completed.", 100);
             return result;
         }
@@ -33,8 +35,10 @@ namespace StartUply.Infrastructure.Services
         {
             progressCallback?.Invoke("Analyzing frontend code...", 10);
             var prompt = $"Analyze this frontend code and generate a {targetDomain} backend. Provide the output as a list of files with their paths and content, separated by ---FILE---.\n{frontendCode}";
+            progressCallback?.Invoke("Preparing backend generation...", 20);
             progressCallback?.Invoke("Generating backend code...", 30);
-            var result = await GenerateTextAsync(prompt, progressCallback);
+            var result = await GenerateTextAsync(prompt, progressCallback, 40, 80);
+            progressCallback?.Invoke("Processing backend files...", 90);
             progressCallback?.Invoke("Backend generation completed.", 100);
             return result;
         }
@@ -43,15 +47,17 @@ namespace StartUply.Infrastructure.Services
         {
             progressCallback?.Invoke("Preparing project generation...", 10);
             var prompt = $"Generate a basic project structure and starter files for a {domain} application. Provide the output as a list of files with their paths and content, separated by ---FILE---.\nFor example:\n---FILE: package.json ---\n{{\"name\": \"my-app\"}}\n---FILE: src/index.js ---\nconsole.log('Hello');";
+            progressCallback?.Invoke("Analyzing requirements...", 20);
             progressCallback?.Invoke("Generating project files...", 30);
-            var result = await GenerateTextAsync(prompt, progressCallback);
+            var result = await GenerateTextAsync(prompt, progressCallback, 40, 80);
+            progressCallback?.Invoke("Processing project structure...", 90);
             progressCallback?.Invoke("Project generation completed.", 100);
             return result;
         }
 
-        private async Task<string> GenerateTextAsync(string prompt, Action<string, int>? progressCallback = null)
+        private async Task<string> GenerateTextAsync(string prompt, Action<string, int>? progressCallback = null, int minProgress = 50, int maxProgress = 80)
         {
-            progressCallback?.Invoke("Sending request to AI model...", 50);
+            progressCallback?.Invoke("Sending request to AI model...", minProgress);
             var request = new
             {
                 model = ModelId,
@@ -64,7 +70,7 @@ namespace StartUply.Infrastructure.Services
             };
             var response = await _httpClient.PostAsJsonAsync("chat/completions", request);
             response.EnsureSuccessStatusCode();
-            progressCallback?.Invoke("Processing AI response...", 80);
+            progressCallback?.Invoke("Processing AI response...", maxProgress);
             var result = await response.Content.ReadFromJsonAsync<OpenRouterResponse>();
             return result?.Choices?.FirstOrDefault()?.Message?.Content ?? "Error generating response";
         }
