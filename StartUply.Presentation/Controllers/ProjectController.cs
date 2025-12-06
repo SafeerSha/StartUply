@@ -14,6 +14,7 @@ namespace StartUply.Presentation.Controllers
     public class ProjectController : ControllerBase
     {
         private static ConcurrentDictionary<string, ProjectData> _projects = new();
+        private static ConcurrentDictionary<string, ProgressStatus> _progressStore = new();
         private readonly IAIService _aiService;
         private readonly IHubContext<ProgressHub> _hubContext;
 
@@ -44,11 +45,8 @@ namespace StartUply.Presentation.Controllers
         [HttpPost("createBase")]
         public async Task<IActionResult> CreateBaseProject([FromBody] CreateBaseRequest request)
         {
-            Action<string, int>? progressCallback = null;
-            if (!string.IsNullOrEmpty(request.ConnectionId))
-            {
-                progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
-            }
+            var taskId = Guid.NewGuid().ToString();
+            var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
 
             var baseCode = await _aiService.GenerateBaseProjectAsync(request.Domain, progressCallback);
             var convertedFiles = ParseConvertedFiles(baseCode);
@@ -72,7 +70,7 @@ namespace StartUply.Presentation.Controllers
             var folders = Directory.GetDirectories(tempDir).Select(Path.GetFileName).ToArray();
             _projects[id] = new ProjectData { Path = tempDir, Folders = folders, CreatedAt = DateTime.UtcNow };
 
-            return Ok(new { id, folders });
+            return Ok(new { id, folders, taskId });
         }
 
         [HttpPost("convert")]
@@ -102,11 +100,8 @@ namespace StartUply.Presentation.Controllers
                 Directory.CreateDirectory(newTempDir);
             }
 
-            Action<string, int>? progressCallback = null;
-            if (!string.IsNullOrEmpty(request.ConnectionId))
-            {
-                progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
-            }
+            var taskId = Guid.NewGuid().ToString();
+            var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
 
             var code = ReadProjectCode(project.Path);
             var convertedCode = await _aiService.ConvertCodeAsync(code, request.FromDomain, request.TargetDomain, progressCallback);
@@ -129,7 +124,7 @@ namespace StartUply.Presentation.Controllers
             var newFolders = Directory.GetDirectories(newTempDir).Select(Path.GetFileName).ToArray();
             _projects[newId] = new ProjectData { Path = newTempDir, Folders = newFolders, CreatedAt = DateTime.UtcNow };
 
-            return Ok(new { convertedProjectId = newId, folders = newFolders });
+            return Ok(new { convertedProjectId = newId, folders = newFolders, taskId });
         }
 
         [HttpPost("generate")]
@@ -140,11 +135,8 @@ namespace StartUply.Presentation.Controllers
                 return NotFound(new { error = "Project not found" });
             }
 
-            Action<string, int>? progressCallback = null;
-            if (!string.IsNullOrEmpty(request.ConnectionId))
-            {
-                progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
-            }
+            var taskId = Guid.NewGuid().ToString();
+            var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
 
             var frontendCode = ReadProjectCode(project.Path);
             var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetDomain, progressCallback);
@@ -170,7 +162,7 @@ namespace StartUply.Presentation.Controllers
             var newFolders = Directory.GetDirectories(newTempDir).Select(Path.GetFileName).ToArray();
             _projects[newId] = new ProjectData { Path = newTempDir, Folders = newFolders, CreatedAt = DateTime.UtcNow };
 
-            return Ok(new { backendProjectId = newId, folders = newFolders });
+            return Ok(new { backendProjectId = newId, folders = newFolders, taskId });
         }
 
         [HttpGet("download/{id}")]
@@ -204,6 +196,16 @@ namespace StartUply.Presentation.Controllers
             return result;
         }
 
+        [HttpGet("progress/{taskId}")]
+        public IActionResult GetProgress(string taskId)
+        {
+            if (_progressStore.TryGetValue(taskId, out var progress))
+            {
+                return Ok(progress);
+            }
+            return NotFound(new { error = "Progress not found" });
+        }
+
         [HttpPost("process")]
         public async Task<IActionResult> Process([FromBody] ProcessRequest request)
         {
@@ -224,11 +226,8 @@ namespace StartUply.Presentation.Controllers
                 if (request.Mode == "conversion")
                 {
                     if (string.IsNullOrEmpty(projectId)) return BadRequest(new { error = "GithubUrl required for conversion" });
-                    Action<string, int>? progressCallback = null;
-                    if (!string.IsNullOrEmpty(request.ConnectionId))
-                    {
-                        progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
-                    }
+                    var taskId = Guid.NewGuid().ToString();
+                    var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
                     var project = _projects[projectId];
                     var code = ReadProjectCode(project.Path);
                     var convertedCode = await _aiService.ConvertCodeAsync(code, "JavaScript", request.TargetFramework, progressCallback);
@@ -250,18 +249,15 @@ namespace StartUply.Presentation.Controllers
                     }
                     var newFolders = Directory.GetDirectories(newTempDir).Select(Path.GetFileName).ToArray();
                     _projects[newId] = new ProjectData { Path = newTempDir, Folders = newFolders, CreatedAt = DateTime.UtcNow };
-                    return Ok(new { projectId = newId, folders = newFolders });
+                    return Ok(new { projectId = newId, folders = newFolders, taskId });
                 }
                 else if (request.Mode == "generate")
                 {
                     if (request.Type == "backend")
                     {
                         if (string.IsNullOrEmpty(projectId)) return BadRequest(new { error = "GithubUrl required for backend generation" });
-                        Action<string, int>? progressCallback = null;
-                        if (!string.IsNullOrEmpty(request.ConnectionId))
-                        {
-                            progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
-                        }
+                        var taskId = Guid.NewGuid().ToString();
+                        var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
                         var project = _projects[projectId];
                         var frontendCode = ReadProjectCode(project.Path);
                         var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetFramework, progressCallback);
@@ -283,15 +279,12 @@ namespace StartUply.Presentation.Controllers
                         }
                         var newFolders = Directory.GetDirectories(newTempDir).Select(Path.GetFileName).ToArray();
                         _projects[newId] = new ProjectData { Path = newTempDir, Folders = newFolders, CreatedAt = DateTime.UtcNow };
-                        return Ok(new { projectId = newId, folders = newFolders });
+                        return Ok(new { projectId = newId, folders = newFolders, taskId });
                     }
                     else if (request.Type == "frontend")
                     {
-                        Action<string, int>? progressCallback = null;
-                        if (!string.IsNullOrEmpty(request.ConnectionId))
-                        {
-                            progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
-                        }
+                        var taskId = Guid.NewGuid().ToString();
+                        var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
                         var baseCode = await _aiService.GenerateBaseProjectAsync(request.TargetFramework, progressCallback);
                         var convertedFiles = ParseConvertedFiles(baseCode);
                         var id = Guid.NewGuid().ToString();
@@ -311,7 +304,7 @@ namespace StartUply.Presentation.Controllers
                         }
                         var folders = Directory.GetDirectories(tempDir).Select(Path.GetFileName).ToArray();
                         _projects[id] = new ProjectData { Path = tempDir, Folders = folders, CreatedAt = DateTime.UtcNow };
-                        return Ok(new { projectId = id, folders });
+                        return Ok(new { projectId = id, folders, taskId });
                     }
                     else
                     {
@@ -353,6 +346,25 @@ namespace StartUply.Presentation.Controllers
                 }
             }
             return files;
+        }
+
+        private Action<string, int> CreateProgressCallback(string taskId, string? connectionId)
+        {
+            return (message, percentage) =>
+            {
+                var progress = new ProgressStatus
+                {
+                    Message = message,
+                    Percentage = percentage,
+                    Timestamp = DateTime.UtcNow
+                };
+                _progressStore[taskId] = progress;
+
+                if (!string.IsNullOrEmpty(connectionId))
+                {
+                    _hubContext.Clients.Client(connectionId).SendAsync("ReceiveProgress", message, percentage);
+                }
+            };
         }
     }
 
@@ -397,5 +409,12 @@ namespace StartUply.Presentation.Controllers
         public string? Type { get; set; }
         public string TargetFramework { get; set; }
         public string? ConnectionId { get; set; }
+    }
+
+    public class ProgressStatus
+    {
+        public string Message { get; set; }
+        public int Percentage { get; set; }
+        public DateTime Timestamp { get; set; }
     }
 }
