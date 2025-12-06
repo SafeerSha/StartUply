@@ -230,7 +230,7 @@ namespace StartUply.Presentation.Controllers
                     var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
                     var project = _projects[projectId];
                     var code = ReadProjectCode(project.Path);
-                    var convertedCode = await _aiService.ConvertCodeAsync(code, "JavaScript", request.TargetFramework, progressCallback);
+                    var convertedCode = await _aiService.ConvertCodeAsync(code, request.FromFramework ?? "React", request.TargetFramework, progressCallback);
                     var convertedFiles = ParseConvertedFiles(convertedCode);
                     var newId = Guid.NewGuid().ToString();
                     var newTempDir = Path.Combine(Path.GetTempPath(), newId);
@@ -408,6 +408,7 @@ namespace StartUply.Presentation.Controllers
         public string Mode { get; set; }
         public string? Type { get; set; }
         public string TargetFramework { get; set; }
+        public string? FromFramework { get; set; }
         public string? ConnectionId { get; set; }
     }
 

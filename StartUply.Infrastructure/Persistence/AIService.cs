@@ -22,7 +22,7 @@ namespace StartUply.Infrastructure.Services
         public async Task<string> ConvertCodeAsync(string code, string fromDomain, string toDomain, Action<string, int>? progressCallback = null)
         {
             progressCallback?.Invoke("Preparing conversion request...", 10);
-            var prompt = $"Convert this {fromDomain} code to {toDomain}. The input is structured as ---FILE: relative/path --- followed by content. Provide the output in the same format, with converted code for each file.\n{code}";
+            var prompt = $"Convert this {fromDomain} project to {toDomain}. Analyze the provided code files and generate a complete {toDomain} project structure with all necessary files, including package.json, configuration files, main entry points, and proper directory structure. Provide the output as ---FILE: relative/path --- content for each file.\n{code}";
             progressCallback?.Invoke("Sending request to AI service...", 30);
             var result = await GenerateTextAsync(prompt, progressCallback);
             progressCallback?.Invoke("Conversion completed.", 100);
