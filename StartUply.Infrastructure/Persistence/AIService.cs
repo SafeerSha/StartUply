@@ -1,4 +1,5 @@
 using StartUply.Application.Interfaces;
+using System;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
 using System.Net.Http.Headers;
@@ -58,9 +59,9 @@ namespace StartUply.Infrastructure.Services
 
         private async Task<string> GenerateTextAsync(string prompt, Action<string, int>? progressCallback = null, int minProgress = 50, int maxProgress = 80)
         {
-            const int maxRetries = 3;
+            const int maxRetries = 5;
             int retryCount = 0;
-            int delayMs = 1000; // Start with 1 second
+            int delayMs = 2000; // Start with 2 seconds
 
             while (retryCount < maxRetries)
             {
@@ -88,11 +89,11 @@ namespace StartUply.Infrastructure.Services
                     retryCount++;
                     if (retryCount >= maxRetries)
                     {
-                        throw new Exception("Rate limit exceeded. Please try again later.", ex);
+                        throw new Exception("Rate limit exceeded after multiple retries. The free AI model has strict limits. Consider upgrading to a paid plan or waiting longer before retrying.", ex);
                     }
-                    progressCallback?.Invoke($"Rate limit hit, waiting {delayMs}ms before retry...", minProgress);
+                    progressCallback?.Invoke($"Rate limit hit, waiting {delayMs}ms before retry {retryCount}/{maxRetries}...", minProgress);
                     await Task.Delay(delayMs);
-                    delayMs *= 2; // Exponential backoff
+                    delayMs = Math.Min(delayMs * 2, 30000); // Exponential backoff, max 30 seconds
                 }
             }
 
