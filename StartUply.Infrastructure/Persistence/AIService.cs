@@ -9,7 +9,7 @@ namespace StartUply.Infrastructure.Services
     {
         private readonly HttpClient _httpClient;
         private readonly string _apiKey;
-        private const string ModelId = "amazon/nova-2-lite-v1";
+        private const string ModelId = "tngtech/deepseek-r1t2-chimera";
 
         public AIService(HttpClient httpClient, IConfiguration configuration)
         {
@@ -65,7 +65,7 @@ namespace StartUply.Infrastructure.Services
                 {
                     new { role = "user", content = prompt }
                 },
-                max_tokens = 1000,
+                max_tokens = 8000,
                 temperature = 0.2
             };
             var response = await _httpClient.PostAsJsonAsync("chat/completions", request);
