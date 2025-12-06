@@ -75,7 +75,7 @@ namespace StartUply.Infrastructure.Services
                         {
                             new { role = "user", content = prompt }
                         },
-                        max_tokens = 8000,
+                        max_tokens = 8192,
                         temperature = 0.2
                     };
                     var response = await _httpClient.PostAsJsonAsync("chat/completions", request);
