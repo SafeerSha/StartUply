@@ -9,13 +9,13 @@ namespace StartUply.Infrastructure.Services
     {
         private readonly HttpClient _httpClient;
         private readonly string _apiKey;
-        private const string ModelId = "bigcode/starcoderbase"; // Example model, adjust as needed
+        private const string ModelId = "amazon/nova-2-lite-v1";
 
         public AIService(HttpClient httpClient, IConfiguration configuration)
         {
             _httpClient = httpClient;
-            _httpClient.BaseAddress = new Uri("https://api-inference.huggingface.co/models/");
-            _apiKey = configuration["HuggingFace:ApiKey"] ?? throw new ArgumentNullException("HuggingFace:ApiKey is not configured");
+            _httpClient.BaseAddress = new Uri("https://openrouter.ai/api/v1/");
+            _apiKey = configuration["OpenRouter:ApiKey"] ?? throw new ArgumentNullException("OpenRouter:ApiKey is not configured");
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         }
 
@@ -52,17 +52,36 @@ namespace StartUply.Infrastructure.Services
         private async Task<string> GenerateTextAsync(string prompt, Action<string, int>? progressCallback = null)
         {
             progressCallback?.Invoke("Sending request to AI model...", 50);
-            var request = new { inputs = prompt, parameters = new { max_length = 500 } };
-            var response = await _httpClient.PostAsJsonAsync(ModelId, request);
+            var request = new
+            {
+                model = ModelId,
+                messages = new[]
+                {
+                    new { role = "user", content = prompt }
+                },
+                max_tokens = 1000,
+                temperature = 0.2
+            };
+            var response = await _httpClient.PostAsJsonAsync("chat/completions", request);
             response.EnsureSuccessStatusCode();
             progressCallback?.Invoke("Processing AI response...", 80);
-            var result = await response.Content.ReadFromJsonAsync<HuggingFaceResponse[]>();
-            return result?.FirstOrDefault()?.GeneratedText ?? "Error generating response";
+            var result = await response.Content.ReadFromJsonAsync<OpenRouterResponse>();
+            return result?.Choices?.FirstOrDefault()?.Message?.Content ?? "Error generating response";
         }
     }
 
-    public class HuggingFaceResponse
+    public class OpenRouterResponse
     {
-        public string? GeneratedText { get; set; }
+        public Choice[]? Choices { get; set; }
+    }
+
+    public class Choice
+    {
+        public Message? Message { get; set; }
+    }
+
+    public class Message
+    {
+        public string? Content { get; set; }
     }
 }
