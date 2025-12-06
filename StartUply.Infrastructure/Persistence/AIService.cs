@@ -2,6 +2,7 @@ using StartUply.Application.Interfaces;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
 using System.Net.Http.Headers;
+using System.Threading.Tasks;
 
 namespace StartUply.Infrastructure.Services
 {
@@ -57,22 +58,45 @@ namespace StartUply.Infrastructure.Services
 
         private async Task<string> GenerateTextAsync(string prompt, Action<string, int>? progressCallback = null, int minProgress = 50, int maxProgress = 80)
         {
-            progressCallback?.Invoke("Sending request to AI model...", minProgress);
-            var request = new
+            const int maxRetries = 3;
+            int retryCount = 0;
+            int delayMs = 1000; // Start with 1 second
+
+            while (retryCount < maxRetries)
             {
-                model = ModelId,
-                messages = new[]
+                try
                 {
-                    new { role = "user", content = prompt }
-                },
-                max_tokens = 8000,
-                temperature = 0.2
-            };
-            var response = await _httpClient.PostAsJsonAsync("chat/completions", request);
-            response.EnsureSuccessStatusCode();
-            progressCallback?.Invoke("Processing AI response...", maxProgress);
-            var result = await response.Content.ReadFromJsonAsync<OpenRouterResponse>();
-            return result?.Choices?.FirstOrDefault()?.Message?.Content ?? "Error generating response";
+                    progressCallback?.Invoke($"Sending request to AI model...{(retryCount > 0 ? $" (retry {retryCount})" : "")}", minProgress);
+                    var request = new
+                    {
+                        model = ModelId,
+                        messages = new[]
+                        {
+                            new { role = "user", content = prompt }
+                        },
+                        max_tokens = 8000,
+                        temperature = 0.2
+                    };
+                    var response = await _httpClient.PostAsJsonAsync("chat/completions", request);
+                    response.EnsureSuccessStatusCode();
+                    progressCallback?.Invoke("Processing AI response...", maxProgress);
+                    var result = await response.Content.ReadFromJsonAsync<OpenRouterResponse>();
+                    return result?.Choices?.FirstOrDefault()?.Message?.Content ?? "Error generating response";
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                {
+                    retryCount++;
+                    if (retryCount >= maxRetries)
+                    {
+                        throw new Exception("Rate limit exceeded. Please try again later.", ex);
+                    }
+                    progressCallback?.Invoke($"Rate limit hit, waiting {delayMs}ms before retry...", minProgress);
+                    await Task.Delay(delayMs);
+                    delayMs *= 2; // Exponential backoff
+                }
+            }
+
+            throw new Exception("Unexpected error in AI service");
         }
     }
 
