@@ -9,7 +9,7 @@ namespace StartUply.Infrastructure.Services
     {
         private readonly HttpClient _httpClient;
         private readonly string _apiKey;
-        private const string ModelId = "tngtech/deepseek-r1t2-chimera";
+        private const string ModelId = "google/gemini-2.0-flash-exp:free";
 
         public AIService(HttpClient httpClient, IConfiguration configuration)
         {
