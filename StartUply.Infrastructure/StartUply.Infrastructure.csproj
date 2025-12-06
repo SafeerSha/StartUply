@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\StartUply.Application\StartUply.Application.csproj" />
     <ProjectReference Include="..\StartUply.Domain\StartUply.Domain.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="8.0.0" />
   </ItemGroup>
 
   <PropertyGroup>
