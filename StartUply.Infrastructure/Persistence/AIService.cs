@@ -19,29 +19,43 @@ namespace StartUply.Infrastructure.Services
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         }
 
-        public async Task<string> ConvertCodeAsync(string code, string fromDomain, string toDomain)
+        public async Task<string> ConvertCodeAsync(string code, string fromDomain, string toDomain, Action<string, int>? progressCallback = null)
         {
+            progressCallback?.Invoke("Preparing conversion request...", 10);
             var prompt = $"Convert this {fromDomain} code to {toDomain}. The input is structured as ---FILE: relative/path --- followed by content. Provide the output in the same format, with converted code for each file.\n{code}";
-            return await GenerateTextAsync(prompt);
+            progressCallback?.Invoke("Sending request to AI service...", 30);
+            var result = await GenerateTextAsync(prompt, progressCallback);
+            progressCallback?.Invoke("Conversion completed.", 100);
+            return result;
         }
 
-        public async Task<string> GenerateBackendAsync(string frontendCode, string targetDomain)
+        public async Task<string> GenerateBackendAsync(string frontendCode, string targetDomain, Action<string, int>? progressCallback = null)
         {
+            progressCallback?.Invoke("Analyzing frontend code...", 10);
             var prompt = $"Analyze this frontend code and generate a {targetDomain} backend. Provide the output as a list of files with their paths and content, separated by ---FILE---.\n{frontendCode}";
-            return await GenerateTextAsync(prompt);
+            progressCallback?.Invoke("Generating backend code...", 30);
+            var result = await GenerateTextAsync(prompt, progressCallback);
+            progressCallback?.Invoke("Backend generation completed.", 100);
+            return result;
         }
 
-        public async Task<string> GenerateBaseProjectAsync(string domain)
+        public async Task<string> GenerateBaseProjectAsync(string domain, Action<string, int>? progressCallback = null)
         {
+            progressCallback?.Invoke("Preparing project generation...", 10);
             var prompt = $"Generate a basic project structure and starter files for a {domain} application. Provide the output as a list of files with their paths and content, separated by ---FILE---.\nFor example:\n---FILE: package.json ---\n{{\"name\": \"my-app\"}}\n---FILE: src/index.js ---\nconsole.log('Hello');";
-            return await GenerateTextAsync(prompt);
+            progressCallback?.Invoke("Generating project files...", 30);
+            var result = await GenerateTextAsync(prompt, progressCallback);
+            progressCallback?.Invoke("Project generation completed.", 100);
+            return result;
         }
 
-        private async Task<string> GenerateTextAsync(string prompt)
+        private async Task<string> GenerateTextAsync(string prompt, Action<string, int>? progressCallback = null)
         {
+            progressCallback?.Invoke("Sending request to AI model...", 50);
             var request = new { inputs = prompt, parameters = new { max_length = 500 } };
             var response = await _httpClient.PostAsJsonAsync(ModelId, request);
             response.EnsureSuccessStatusCode();
+            progressCallback?.Invoke("Processing AI response...", 80);
             var result = await response.Content.ReadFromJsonAsync<HuggingFaceResponse[]>();
             return result?.FirstOrDefault()?.GeneratedText ?? "Error generating response";
         }

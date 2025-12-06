@@ -8,6 +8,8 @@ builder.WebHost.UseUrls($"http://+:{port}");
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.AddControllers();
+builder.Services.AddSignalR();
 
 builder.Services.AddHttpClient<StartUply.Application.Interfaces.IAIService, StartUply.Infrastructure.Services.AIService>();
 
@@ -21,6 +23,9 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+
+app.MapControllers();
+app.MapHub<StartUply.Presentation.Hubs.ProgressHub>("/progressHub");
 
 var summaries = new[]
 {

@@ -4,6 +4,8 @@ using System.IO;
 using System.Collections.Concurrent;
 using System.IO.Compression;
 using StartUply.Application.Interfaces;
+using Microsoft.AspNetCore.SignalR;
+using StartUply.Presentation.Hubs;
 
 namespace StartUply.Presentation.Controllers
 {
@@ -13,10 +15,12 @@ namespace StartUply.Presentation.Controllers
     {
         private static ConcurrentDictionary<string, ProjectData> _projects = new();
         private readonly IAIService _aiService;
+        private readonly IHubContext<ProgressHub> _hubContext;
 
-        public ProjectController(IAIService aiService)
+        public ProjectController(IAIService aiService, IHubContext<ProgressHub> hubContext)
         {
             _aiService = aiService;
+            _hubContext = hubContext;
         }
 
         [HttpPost("clone")]
@@ -40,7 +44,13 @@ namespace StartUply.Presentation.Controllers
         [HttpPost("createBase")]
         public async Task<IActionResult> CreateBaseProject([FromBody] CreateBaseRequest request)
         {
-            var baseCode = await _aiService.GenerateBaseProjectAsync(request.Domain);
+            Action<string, int>? progressCallback = null;
+            if (!string.IsNullOrEmpty(request.ConnectionId))
+            {
+                progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
+            }
+
+            var baseCode = await _aiService.GenerateBaseProjectAsync(request.Domain, progressCallback);
             var convertedFiles = ParseConvertedFiles(baseCode);
             var id = Guid.NewGuid().ToString();
             var tempDir = Path.Combine(Path.GetTempPath(), id);
@@ -92,8 +102,14 @@ namespace StartUply.Presentation.Controllers
                 Directory.CreateDirectory(newTempDir);
             }
 
+            Action<string, int>? progressCallback = null;
+            if (!string.IsNullOrEmpty(request.ConnectionId))
+            {
+                progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
+            }
+
             var code = ReadProjectCode(project.Path);
-            var convertedCode = await _aiService.ConvertCodeAsync(code, request.FromDomain, request.TargetDomain);
+            var convertedCode = await _aiService.ConvertCodeAsync(code, request.FromDomain, request.TargetDomain, progressCallback);
 
             var convertedFiles = ParseConvertedFiles(convertedCode);
 
@@ -124,8 +140,14 @@ namespace StartUply.Presentation.Controllers
                 return NotFound(new { error = "Project not found" });
             }
 
+            Action<string, int>? progressCallback = null;
+            if (!string.IsNullOrEmpty(request.ConnectionId))
+            {
+                progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
+            }
+
             var frontendCode = ReadProjectCode(project.Path);
-            var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetDomain);
+            var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetDomain, progressCallback);
 
             var backendFiles = ParseConvertedFiles(backendCode);
             var newId = Guid.NewGuid().ToString();
@@ -189,7 +211,7 @@ namespace StartUply.Presentation.Controllers
             {
                 string? projectId = null;
                 if (!string.IsNullOrEmpty(request.GithubUrl))
-                {
+                add{
                     // Clone
                     var id = Guid.NewGuid().ToString();
                     var tempDir = Path.Combine(Path.GetTempPath(), id);
@@ -202,9 +224,14 @@ namespace StartUply.Presentation.Controllers
                 if (request.Mode == "conversion")
                 {
                     if (string.IsNullOrEmpty(projectId)) return BadRequest(new { error = "GithubUrl required for conversion" });
+                    Action<string, int>? progressCallback = null;
+                    if (!string.IsNullOrEmpty(request.ConnectionId))
+                    {
+                        progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
+                    }
                     var project = _projects[projectId];
                     var code = ReadProjectCode(project.Path);
-                    var convertedCode = await _aiService.ConvertCodeAsync(code, "JavaScript", request.TargetFramework);
+                    var convertedCode = await _aiService.ConvertCodeAsync(code, "JavaScript", request.TargetFramework, progressCallback);
                     var convertedFiles = ParseConvertedFiles(convertedCode);
                     var newId = Guid.NewGuid().ToString();
                     var newTempDir = Path.Combine(Path.GetTempPath(), newId);
@@ -230,9 +257,14 @@ namespace StartUply.Presentation.Controllers
                     if (request.Type == "backend")
                     {
                         if (string.IsNullOrEmpty(projectId)) return BadRequest(new { error = "GithubUrl required for backend generation" });
+                        Action<string, int>? progressCallback = null;
+                        if (!string.IsNullOrEmpty(request.ConnectionId))
+                        {
+                            progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
+                        }
                         var project = _projects[projectId];
                         var frontendCode = ReadProjectCode(project.Path);
-                        var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetFramework);
+                        var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetFramework, progressCallback);
                         var backendFiles = ParseConvertedFiles(backendCode);
                         var newId = Guid.NewGuid().ToString();
                         var newTempDir = Path.Combine(Path.GetTempPath(), newId);
@@ -255,7 +287,12 @@ namespace StartUply.Presentation.Controllers
                     }
                     else if (request.Type == "frontend")
                     {
-                        var baseCode = await _aiService.GenerateBaseProjectAsync(request.TargetFramework);
+                        Action<string, int>? progressCallback = null;
+                        if (!string.IsNullOrEmpty(request.ConnectionId))
+                        {
+                            progressCallback = (message, percentage) => _hubContext.Clients.Client(request.ConnectionId).SendAsync("ReceiveProgress", message, percentage);
+                        }
+                        var baseCode = await _aiService.GenerateBaseProjectAsync(request.TargetFramework, progressCallback);
                         var convertedFiles = ParseConvertedFiles(baseCode);
                         var id = Guid.NewGuid().ToString();
                         var tempDir = Path.Combine(Path.GetTempPath(), id);
@@ -327,6 +364,7 @@ namespace StartUply.Presentation.Controllers
     public class CreateBaseRequest
     {
         public string Domain { get; set; }
+        public string? ConnectionId { get; set; }
     }
 
     public class ConvertRequest
@@ -335,12 +373,14 @@ namespace StartUply.Presentation.Controllers
         public string FromDomain { get; set; }
         public string TargetDomain { get; set; }
         public string? BaseProjectId { get; set; }
+        public string? ConnectionId { get; set; }
     }
 
     public class GenerateRequest
     {
         public string Id { get; set; }
         public string TargetDomain { get; set; }
+        public string? ConnectionId { get; set; }
     }
 
     public class ProjectData
@@ -356,5 +396,6 @@ namespace StartUply.Presentation.Controllers
         public string Mode { get; set; }
         public string? Type { get; set; }
         public string TargetFramework { get; set; }
+        public string? ConnectionId { get; set; }
     }
 }
