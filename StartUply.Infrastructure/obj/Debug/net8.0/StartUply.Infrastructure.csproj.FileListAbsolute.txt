@@ -1,0 +1,17 @@
+/workspaces/codespaces-blank/StartUply.Infrastructure/bin/Debug/net8.0/StartUply.Infrastructure.deps.json
+/workspaces/codespaces-blank/StartUply.Infrastructure/bin/Debug/net8.0/StartUply.Infrastructure.dll
+/workspaces/codespaces-blank/StartUply.Infrastructure/bin/Debug/net8.0/StartUply.Infrastructure.pdb
+/workspaces/codespaces-blank/StartUply.Infrastructure/bin/Debug/net8.0/StartUply.Application.dll
+/workspaces/codespaces-blank/StartUply.Infrastructure/bin/Debug/net8.0/StartUply.Domain.dll
+/workspaces/codespaces-blank/StartUply.Infrastructure/bin/Debug/net8.0/StartUply.Application.pdb
+/workspaces/codespaces-blank/StartUply.Infrastructure/bin/Debug/net8.0/StartUply.Domain.pdb
+/workspaces/codespaces-blank/StartUply.Infrastructure/obj/Debug/net8.0/StartUply.Infrastructure.csproj.AssemblyReference.cache
+/workspaces/codespaces-blank/StartUply.Infrastructure/obj/Debug/net8.0/StartUply.Infrastructure.GeneratedMSBuildEditorConfig.editorconfig
+/workspaces/codespaces-blank/StartUply.Infrastructure/obj/Debug/net8.0/StartUply.Infrastructure.AssemblyInfoInputs.cache
+/workspaces/codespaces-blank/StartUply.Infrastructure/obj/Debug/net8.0/StartUply.Infrastructure.AssemblyInfo.cs
+/workspaces/codespaces-blank/StartUply.Infrastructure/obj/Debug/net8.0/StartUply.Infrastructure.csproj.CoreCompileInputs.cache
+/workspaces/codespaces-blank/StartUply.Infrastructure/obj/Debug/net8.0/StartUpl.07CF5AE8.Up2Date
+/workspaces/codespaces-blank/StartUply.Infrastructure/obj/Debug/net8.0/StartUply.Infrastructure.dll
+/workspaces/codespaces-blank/StartUply.Infrastructure/obj/Debug/net8.0/refint/StartUply.Infrastructure.dll
+/workspaces/codespaces-blank/StartUply.Infrastructure/obj/Debug/net8.0/StartUply.Infrastructure.pdb
+/workspaces/codespaces-blank/StartUply.Infrastructure/obj/Debug/net8.0/ref/StartUply.Infrastructure.dll
