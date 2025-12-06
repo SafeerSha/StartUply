@@ -42,6 +42,42 @@ namespace StartUply.Presentation.Controllers
             }
         }
 
+        [HttpPost("extract")]
+        public async Task<IActionResult> ExtractStructure([FromBody] CloneRequest request)
+        {
+            string tempDir = null;
+            try
+            {
+                var id = Guid.NewGuid().ToString();
+                tempDir = Path.Combine(Path.GetTempPath(), id);
+                Repository.Clone(request.Url, tempDir);
+
+                // Find the actual repo directory (LibGit2Sharp might create a subdirectory)
+                var repoDir = tempDir;
+                var subDirs = Directory.GetDirectories(tempDir);
+                if (subDirs.Length == 1 && !subDirs[0].EndsWith(".git"))
+                {
+                    repoDir = subDirs[0];
+                }
+
+                var structure = GetDirectoryStructure(repoDir);
+
+                // Clean up immediately after getting structure
+                Directory.Delete(tempDir, true);
+
+                return Ok(new { structure });
+            }
+            catch (Exception ex)
+            {
+                // Clean up on error
+                if (tempDir != null && Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, true);
+                }
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
         [HttpPost("createBase")]
         public async Task<IActionResult> CreateBaseProject([FromBody] CreateBaseRequest request)
         {
@@ -331,6 +367,50 @@ namespace StartUply.Presentation.Controllers
             return string.Join("\n", files.Select(f => $"---FILE: {Path.GetRelativePath(path, f)} ---\n{System.IO.File.ReadAllText(f)}"));
         }
 
+        private DirectoryItem GetDirectoryStructure(string path)
+        {
+            var info = new DirectoryInfo(path);
+            var item = new DirectoryItem
+            {
+                Name = info.Name,
+                Type = "directory",
+                Path = "",
+                Children = new List<DirectoryItem>()
+            };
+
+            foreach (var dir in info.GetDirectories().OrderBy(d => d.Name))
+            {
+                // Skip common unwanted directories
+                if (dir.Name.StartsWith('.') || dir.Name == "node_modules" || dir.Name == "dist" || dir.Name == "build")
+                    continue;
+
+                item.Children.Add(GetDirectoryStructure(dir.FullName));
+            }
+
+            foreach (var file in info.GetFiles().OrderBy(f => f.Name))
+            {
+                // Only include relevant file types
+                if (IsRelevantFile(file.Extension))
+                {
+                    item.Children.Add(new DirectoryItem
+                    {
+                        Name = file.Name,
+                        Type = "file",
+                        Path = Path.GetRelativePath(path, file.FullName),
+                        Children = null
+                    });
+                }
+            }
+
+            return item;
+        }
+
+        private bool IsRelevantFile(string extension)
+        {
+            var relevantExtensions = new[] { ".js", ".ts", ".jsx", ".tsx", ".json", ".html", ".css", ".scss", ".less", ".md", ".txt", ".yml", ".yaml", ".xml", ".cs", ".py", ".java", ".cpp", ".c", ".php", ".rb", ".go", ".rs", ".vue", ".svelte", ".dart", ".kt", ".swift" };
+            return relevantExtensions.Contains(extension.ToLower());
+        }
+
         private Dictionary<string, string> ParseConvertedFiles(string response)
         {
             var files = new Dictionary<string, string>();
@@ -417,5 +497,13 @@ namespace StartUply.Presentation.Controllers
         public string Message { get; set; }
         public int Percentage { get; set; }
         public DateTime Timestamp { get; set; }
+    }
+
+    public class DirectoryItem
+    {
+        public string Name { get; set; }
+        public string Type { get; set; } // "directory" or "file"
+        public string Path { get; set; }
+        public List<DirectoryItem> Children { get; set; }
     }
 }
