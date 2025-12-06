@@ -182,6 +182,116 @@ namespace StartUply.Presentation.Controllers
             return result;
         }
 
+        [HttpPost("process")]
+        public async Task<IActionResult> Process([FromBody] ProcessRequest request)
+        {
+            try
+            {
+                string? projectId = null;
+                if (!string.IsNullOrEmpty(request.GithubUrl))
+                {
+                    // Clone
+                    var id = Guid.NewGuid().ToString();
+                    var tempDir = Path.Combine(Path.GetTempPath(), id);
+                    Repository.Clone(request.GithubUrl, tempDir);
+                    var folders = Directory.GetDirectories(tempDir).Select(Path.GetFileName).ToArray();
+                    _projects[id] = new ProjectData { Path = tempDir, Folders = folders, CreatedAt = DateTime.UtcNow };
+                    projectId = id;
+                }
+
+                if (request.Mode == "conversion")
+                {
+                    if (string.IsNullOrEmpty(projectId)) return BadRequest(new { error = "GithubUrl required for conversion" });
+                    var project = _projects[projectId];
+                    var code = ReadProjectCode(project.Path);
+                    var convertedCode = await _aiService.ConvertCodeAsync(code, "JavaScript", request.TargetFramework);
+                    var convertedFiles = ParseConvertedFiles(convertedCode);
+                    var newId = Guid.NewGuid().ToString();
+                    var newTempDir = Path.Combine(Path.GetTempPath(), newId);
+                    Directory.CreateDirectory(newTempDir);
+                    foreach (var kvp in convertedFiles)
+                    {
+                        var relativePath = kvp.Key;
+                        var content = kvp.Value;
+                        var fullPath = Path.Combine(newTempDir, relativePath);
+                        var dir = Path.GetDirectoryName(fullPath);
+                        if (!string.IsNullOrEmpty(dir))
+                        {
+                            Directory.CreateDirectory(dir);
+                        }
+                        System.IO.File.WriteAllText(fullPath, content);
+                    }
+                    var newFolders = Directory.GetDirectories(newTempDir).Select(Path.GetFileName).ToArray();
+                    _projects[newId] = new ProjectData { Path = newTempDir, Folders = newFolders, CreatedAt = DateTime.UtcNow };
+                    return Ok(new { projectId = newId, folders = newFolders });
+                }
+                else if (request.Mode == "generate")
+                {
+                    if (request.Type == "backend")
+                    {
+                        if (string.IsNullOrEmpty(projectId)) return BadRequest(new { error = "GithubUrl required for backend generation" });
+                        var project = _projects[projectId];
+                        var frontendCode = ReadProjectCode(project.Path);
+                        var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetFramework);
+                        var backendFiles = ParseConvertedFiles(backendCode);
+                        var newId = Guid.NewGuid().ToString();
+                        var newTempDir = Path.Combine(Path.GetTempPath(), newId);
+                        Directory.CreateDirectory(newTempDir);
+                        foreach (var kvp in backendFiles)
+                        {
+                            var relativePath = kvp.Key;
+                            var content = kvp.Value;
+                            var fullPath = Path.Combine(newTempDir, relativePath);
+                            var dir = Path.GetDirectoryName(fullPath);
+                            if (!string.IsNullOrEmpty(dir))
+                            {
+                                Directory.CreateDirectory(dir);
+                            }
+                            System.IO.File.WriteAllText(fullPath, content);
+                        }
+                        var newFolders = Directory.GetDirectories(newTempDir).Select(Path.GetFileName).ToArray();
+                        _projects[newId] = new ProjectData { Path = newTempDir, Folders = newFolders, CreatedAt = DateTime.UtcNow };
+                        return Ok(new { projectId = newId, folders = newFolders });
+                    }
+                    else if (request.Type == "frontend")
+                    {
+                        var baseCode = await _aiService.GenerateBaseProjectAsync(request.TargetFramework);
+                        var convertedFiles = ParseConvertedFiles(baseCode);
+                        var id = Guid.NewGuid().ToString();
+                        var tempDir = Path.Combine(Path.GetTempPath(), id);
+                        Directory.CreateDirectory(tempDir);
+                        foreach (var kvp in convertedFiles)
+                        {
+                            var relativePath = kvp.Key;
+                            var content = kvp.Value;
+                            var fullPath = Path.Combine(tempDir, relativePath);
+                            var dir = Path.GetDirectoryName(fullPath);
+                            if (!string.IsNullOrEmpty(dir))
+                            {
+                                Directory.CreateDirectory(dir);
+                            }
+                            System.IO.File.WriteAllText(fullPath, content);
+                        }
+                        var folders = Directory.GetDirectories(tempDir).Select(Path.GetFileName).ToArray();
+                        _projects[id] = new ProjectData { Path = tempDir, Folders = folders, CreatedAt = DateTime.UtcNow };
+                        return Ok(new { projectId = id, folders });
+                    }
+                    else
+                    {
+                        return BadRequest(new { error = "Invalid type for generate" });
+                    }
+                }
+                else
+                {
+                    return BadRequest(new { error = "Invalid mode" });
+                }
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
         private string ReadProjectCode(string path)
         {
             var files = Directory.GetFiles(path, "*.js", SearchOption.AllDirectories)
@@ -238,5 +348,13 @@ namespace StartUply.Presentation.Controllers
         public string Path { get; set; }
         public string[] Folders { get; set; }
         public DateTime CreatedAt { get; set; }
+    }
+
+    public class ProcessRequest
+    {
+        public string? GithubUrl { get; set; }
+        public string Mode { get; set; }
+        public string? Type { get; set; }
+        public string TargetFramework { get; set; }
     }
 }
