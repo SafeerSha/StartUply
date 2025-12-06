@@ -15,7 +15,7 @@ namespace StartUply.Infrastructure.Services
         {
             _httpClient = httpClient;
             _httpClient.BaseAddress = new Uri("https://api-inference.huggingface.co/models/");
-            _apiKey = configuration["HuggingFace:ApiKey"];
+            _apiKey = configuration["HuggingFace:ApiKey"] ?? throw new ArgumentNullException("HuggingFace:ApiKey is not configured");
             _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
         }
 
@@ -63,6 +63,6 @@ namespace StartUply.Infrastructure.Services
 
     public class HuggingFaceResponse
     {
-        public string GeneratedText { get; set; }
+        public string? GeneratedText { get; set; }
     }
 }

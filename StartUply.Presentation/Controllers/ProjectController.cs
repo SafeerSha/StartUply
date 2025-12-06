@@ -211,7 +211,7 @@ namespace StartUply.Presentation.Controllers
             {
                 string? projectId = null;
                 if (!string.IsNullOrEmpty(request.GithubUrl))
-                add{
+                {
                     // Clone
                     var id = Guid.NewGuid().ToString();
                     var tempDir = Path.Combine(Path.GetTempPath(), id);
