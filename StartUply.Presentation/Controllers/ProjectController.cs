@@ -55,7 +55,7 @@ namespace StartUply.Presentation.Controllers
             {
                 var id = Guid.NewGuid().ToString();
                 tempDir = Path.Combine(Path.GetTempPath(), id);
-                Repository.Clone(request.Url, tempDir);
+                CloneRepository(request.Url, tempDir, request.Username, request.Password);
 
                 // Find the actual repo directory (LibGit2Sharp might create a subdirectory)
                 var repoDir = tempDir;
@@ -71,6 +71,15 @@ namespace StartUply.Presentation.Controllers
                 Directory.Delete(tempDir, true);
 
                 return Ok(new { structure });
+            }
+            catch (AuthenticationRequiredException)
+            {
+                // Clean up on error
+                if (tempDir != null && Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, true);
+                }
+                return StatusCode(401, new { error = "Authentication required for this repository. Please provide username and password or personal access token." });
             }
             catch (Exception ex)
             {
@@ -454,20 +463,39 @@ namespace StartUply.Presentation.Controllers
 
         private void CloneRepository(string url, string path, string? username, string? password)
         {
-            CloneOptions cloneOptions;
-            if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
+            try
             {
-                cloneOptions = new CloneOptions(new FetchOptions
+                // First, try to clone without credentials (for public repos)
+                Repository.Clone(url, path);
+            }
+            catch (LibGit2SharpException ex) when (IsAuthenticationError(ex))
+            {
+                // If authentication failed and credentials are provided, retry with credentials
+                if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
                 {
-                    CredentialsProvider = (_url, _user, _cred) =>
-                        new UsernamePasswordCredentials { Username = username, Password = password }
-                });
+                    var cloneOptions = new CloneOptions(new FetchOptions
+                    {
+                        CredentialsProvider = (_url, _user, _cred) =>
+                            new UsernamePasswordCredentials { Username = username, Password = password }
+                    });
+                    Repository.Clone(url, path, cloneOptions);
+                }
+                else
+                {
+                    // No credentials provided for private repo
+                    throw new AuthenticationRequiredException("This repository requires authentication. Please provide username and password or personal access token.");
+                }
             }
-            else
-            {
-                cloneOptions = new CloneOptions();
-            }
-            Repository.Clone(url, path, cloneOptions);
+        }
+
+        private bool IsAuthenticationError(LibGit2SharpException ex)
+        {
+            var message = ex.Message.ToLower();
+            return message.Contains("authentication") ||
+                   message.Contains("credentials") ||
+                   message.Contains("unauthorized") ||
+                   message.Contains("permission denied") ||
+                   ex.ErrorCode == GitErrorCode.Auth;
         }
     }
 
