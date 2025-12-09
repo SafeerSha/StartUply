@@ -495,7 +495,7 @@ namespace StartUply.Presentation.Controllers
                    message.Contains("credentials") ||
                    message.Contains("unauthorized") ||
                    message.Contains("permission denied") ||
-                   ex.ErrorCode == GitErrorCode.Auth;
+                   message.Contains("auth");
         }
     }
 
