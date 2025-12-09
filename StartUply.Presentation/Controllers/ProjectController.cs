@@ -7,6 +7,11 @@ using StartUply.Application.Interfaces;
 using Microsoft.AspNetCore.SignalR;
 using StartUply.Presentation.Hubs;
 
+public class AuthenticationRequiredException : Exception
+{
+    public AuthenticationRequiredException(string message) : base(message) { }
+}
+
 namespace StartUply.Presentation.Controllers
 {
     [ApiController]
@@ -31,7 +36,7 @@ namespace StartUply.Presentation.Controllers
             {
                 var id = Guid.NewGuid().ToString();
                 var tempDir = Path.Combine(Path.GetTempPath(), id);
-                Repository.Clone(request.Url, tempDir);
+                CloneRepository(request.Url, tempDir, request.Username, request.Password);
                 var folders = Directory.GetDirectories(tempDir).Select(Path.GetFileName).ToArray();
                 _projects[id] = new ProjectData { Path = tempDir, Folders = folders, CreatedAt = DateTime.UtcNow };
                 return Ok(new { id, folders });
@@ -253,7 +258,7 @@ namespace StartUply.Presentation.Controllers
                     // Clone
                     var id = Guid.NewGuid().ToString();
                     var tempDir = Path.Combine(Path.GetTempPath(), id);
-                    Repository.Clone(request.GithubUrl, tempDir);
+                    CloneRepository(request.GithubUrl, tempDir, request.Username, request.Password);
                     var folders = Directory.GetDirectories(tempDir).Select(Path.GetFileName).ToArray();
                     _projects[id] = new ProjectData { Path = tempDir, Folders = folders, CreatedAt = DateTime.UtcNow };
                     projectId = id;
@@ -446,11 +451,24 @@ namespace StartUply.Presentation.Controllers
                 }
             };
         }
+
+        private void CloneRepository(string url, string path, string? username, string? password)
+        {
+            var cloneOptions = new CloneOptions();
+            if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
+            {
+                cloneOptions.CredentialsProvider = (_url, _user, _cred) =>
+                    new UsernamePasswordCredentials { Username = username, Password = password };
+            }
+            Repository.Clone(url, path, cloneOptions);
+        }
     }
 
     public class CloneRequest
     {
         public string Url { get; set; }
+        public string? Username { get; set; }
+        public string? Password { get; set; }
     }
 
     public class CreateBaseRequest
@@ -490,6 +508,8 @@ namespace StartUply.Presentation.Controllers
         public string TargetFramework { get; set; }
         public string? FromFramework { get; set; }
         public string? ConnectionId { get; set; }
+        public string? Username { get; set; }
+        public string? Password { get; set; }
     }
 
     public class ProgressStatus
