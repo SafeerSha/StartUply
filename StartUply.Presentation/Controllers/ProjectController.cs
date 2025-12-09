@@ -454,14 +454,18 @@ namespace StartUply.Presentation.Controllers
 
         private void CloneRepository(string url, string path, string? username, string? password)
         {
-            var cloneOptions = new CloneOptions();
+            CloneOptions cloneOptions;
             if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
             {
-                cloneOptions.FetchOptions = new FetchOptions
+                cloneOptions = new CloneOptions(new FetchOptions
                 {
                     CredentialsProvider = (_url, _user, _cred) =>
                         new UsernamePasswordCredentials { Username = username, Password = password }
-                };
+                });
+            }
+            else
+            {
+                cloneOptions = new CloneOptions();
             }
             Repository.Clone(url, path, cloneOptions);
         }
