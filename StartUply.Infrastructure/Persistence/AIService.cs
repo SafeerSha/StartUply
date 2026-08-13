@@ -1,8 +1,9 @@
 using StartUply.Application.Interfaces;
 using System;
+using System.Linq;
+using System.Net.Http;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Configuration;
-using System.Net.Http.Headers;
 using System.Threading.Tasks;
 
 namespace StartUply.Infrastructure.Services
@@ -11,14 +12,16 @@ namespace StartUply.Infrastructure.Services
     {
         private readonly HttpClient _httpClient;
         private readonly string _apiKey;
-        private const string ModelId = "google/gemini-2.0-flash-exp:free";
+        private readonly string _modelId;
 
         public AIService(HttpClient httpClient, IConfiguration configuration)
         {
             _httpClient = httpClient;
-            _httpClient.BaseAddress = new Uri("https://openrouter.ai/api/v1/");
-            _apiKey = configuration["OpenRouter:ApiKey"] ?? throw new ArgumentNullException("OpenRouter:ApiKey is not configured");
-            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", _apiKey);
+            _httpClient.BaseAddress = new Uri("https://generativelanguage.googleapis.com/v1beta/");
+            _apiKey = configuration["Gemini:ApiKey"] 
+                      ?? configuration["OpenRouter:ApiKey"] 
+                      ?? throw new ArgumentNullException("Gemini:ApiKey is not configured in appsettings or environment variables.");
+            _modelId = configuration["Gemini:Model"] ?? "gemini-3.5-flash-lite";
         }
 
         public async Task<string> ConvertCodeAsync(string code, string fromDomain, string toDomain, Action<string, int>? progressCallback = null)
@@ -26,7 +29,7 @@ namespace StartUply.Infrastructure.Services
             progressCallback?.Invoke("Preparing conversion request...", 10);
             var prompt = $"Convert this {fromDomain} project to {toDomain}. Analyze the provided code files and generate a complete {toDomain} project structure with all necessary files, including package.json, configuration files, main entry points, and proper directory structure. Provide the output as ---FILE: relative/path --- content for each file.\n{code}";
             progressCallback?.Invoke("Analyzing code structure...", 20);
-            progressCallback?.Invoke("Sending request to AI service...", 30);
+            progressCallback?.Invoke("Sending request to Gemini AI service...", 30);
             var result = await GenerateTextAsync(prompt, progressCallback, 40, 80);
             progressCallback?.Invoke("Processing generated files...", 90);
             progressCallback?.Invoke("Conversion completed.", 100);
@@ -36,9 +39,9 @@ namespace StartUply.Infrastructure.Services
         public async Task<string> GenerateBackendAsync(string frontendCode, string targetDomain, Action<string, int>? progressCallback = null)
         {
             progressCallback?.Invoke("Analyzing frontend code...", 10);
-            var prompt = $"Analyze this frontend code and generate a {targetDomain} backend. Provide the output as a list of files with their paths and content, separated by ---FILE---.\n{frontendCode}";
+            var prompt = $"Analyze this frontend code and generate a {targetDomain} backend. Provide the output as a list of files with their paths and content, separated by ---FILE: relative/path ---.\n{frontendCode}";
             progressCallback?.Invoke("Preparing backend generation...", 20);
-            progressCallback?.Invoke("Generating backend code...", 30);
+            progressCallback?.Invoke("Generating backend code with Gemini AI...", 30);
             var result = await GenerateTextAsync(prompt, progressCallback, 40, 80);
             progressCallback?.Invoke("Processing backend files...", 90);
             progressCallback?.Invoke("Backend generation completed.", 100);
@@ -48,9 +51,9 @@ namespace StartUply.Infrastructure.Services
         public async Task<string> GenerateBaseProjectAsync(string domain, Action<string, int>? progressCallback = null)
         {
             progressCallback?.Invoke("Preparing project generation...", 10);
-            var prompt = $"Generate a basic project structure and starter files for a {domain} application. Provide the output as a list of files with their paths and content, separated by ---FILE---.\nFor example:\n---FILE: package.json ---\n{{\"name\": \"my-app\"}}\n---FILE: src/index.js ---\nconsole.log('Hello');";
+            var prompt = $"Generate a basic project structure and starter files for a {domain} application. Provide the output as a list of files with their paths and content, separated by ---FILE: relative/path ---.\nFor example:\n---FILE: package.json ---\n{{\"name\": \"my-app\"}}\n---FILE: src/index.js ---\nconsole.log('Hello');";
             progressCallback?.Invoke("Analyzing requirements...", 20);
-            progressCallback?.Invoke("Generating project files...", 30);
+            progressCallback?.Invoke("Generating project files with Gemini AI...", 30);
             var result = await GenerateTextAsync(prompt, progressCallback, 40, 80);
             progressCallback?.Invoke("Processing project structure...", 90);
             progressCallback?.Invoke("Project generation completed.", 100);
@@ -61,58 +64,77 @@ namespace StartUply.Infrastructure.Services
         {
             const int maxRetries = 5;
             int retryCount = 0;
-            int delayMs = 2000; // Start with 2 seconds
+            int delayMs = 2000;
 
             while (retryCount < maxRetries)
             {
                 try
                 {
-                    progressCallback?.Invoke($"Sending request to AI model...{(retryCount > 0 ? $" (retry {retryCount})" : "")}", minProgress);
+                    progressCallback?.Invoke($"Sending request to Gemini AI...{(retryCount > 0 ? $" (retry {retryCount})" : "")}", minProgress);
+
                     var request = new
                     {
-                        model = ModelId,
-                        messages = new[]
+                        contents = new[]
                         {
-                            new { role = "user", content = prompt }
+                            new
+                            {
+                                parts = new[]
+                                {
+                                    new { text = prompt }
+                                }
+                            }
                         },
-                        max_tokens = 8192,
-                        temperature = 0.2
+                        generationConfig = new
+                        {
+                            temperature = 0.2,
+                            maxOutputTokens = 8192
+                        }
                     };
-                    var response = await _httpClient.PostAsJsonAsync("chat/completions", request);
+
+                    var endpoint = $"models/{_modelId}:generateContent?key={_apiKey}";
+                    var response = await _httpClient.PostAsJsonAsync(endpoint, request);
                     response.EnsureSuccessStatusCode();
-                    progressCallback?.Invoke("Processing AI response...", maxProgress);
-                    var result = await response.Content.ReadFromJsonAsync<OpenRouterResponse>();
-                    return result?.Choices?.FirstOrDefault()?.Message?.Content ?? "Error generating response";
+
+                    progressCallback?.Invoke("Processing Gemini AI response...", maxProgress);
+                    var result = await response.Content.ReadFromJsonAsync<GeminiResponse>();
+                    var generatedText = result?.Candidates?.FirstOrDefault()?.Content?.Parts?.FirstOrDefault()?.Text;
+
+                    return generatedText ?? "Error generating response from Gemini API";
                 }
                 catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
                 {
                     retryCount++;
                     if (retryCount >= maxRetries)
                     {
-                        throw new Exception("Rate limit exceeded after multiple retries. The free AI model has strict limits. Consider upgrading to a paid plan or waiting longer before retrying.", ex);
+                        throw new Exception("Rate limit exceeded after multiple retries with Gemini API. Please wait a moment before retrying.", ex);
                     }
-                    progressCallback?.Invoke($"Rate limit hit, waiting {delayMs}ms before retry {retryCount}/{maxRetries}...", minProgress);
+                    progressCallback?.Invoke($"Gemini rate limit hit, waiting {delayMs}ms before retry {retryCount}/{maxRetries}...", minProgress);
                     await Task.Delay(delayMs);
-                    delayMs = Math.Min(delayMs * 2, 30000); // Exponential backoff, max 30 seconds
+                    delayMs = Math.Min(delayMs * 2, 30000);
                 }
             }
 
-            throw new Exception("Unexpected error in AI service");
+            throw new Exception("Unexpected error in Gemini AI service");
         }
     }
 
-    public class OpenRouterResponse
+    public class GeminiResponse
     {
-        public Choice[]? Choices { get; set; }
+        public GeminiCandidate[]? Candidates { get; set; }
     }
 
-    public class Choice
+    public class GeminiCandidate
     {
-        public Message? Message { get; set; }
+        public GeminiContent? Content { get; set; }
     }
 
-    public class Message
+    public class GeminiContent
     {
-        public string? Content { get; set; }
+        public GeminiPart[]? Parts { get; set; }
+    }
+
+    public class GeminiPart
+    {
+        public string? Text { get; set; }
     }
 }

@@ -34,8 +34,8 @@
 StartUply is architected as a decoupled full-stack application:
 
 * **Frontend Layer (`StartUply_UI`)**: Built with **Next.js 16 (App Router)** and **React 19**, acting as a single-page interactive control center. It connects to the backend via HTTP REST endpoints and persistent WebSockets via **ASP.NET Core SignalR**.
-* **Backend Layer (`StartUply`)**: Built with **.NET 8** following **Clean Architecture** principles (`Domain`, `Application`, `Infrastructure`, `Presentation`). Handles repository cloning, AI code processing via OpenRouter API, file parsing, and file compression.
-* **AI & Transformation Layer**: Integrates with Google's `gemini-2.0-flash-exp` model via OpenRouter API to process code transformations and format outputs using structured file delimiters (`---FILE: relative/path ---`).
+* **Backend Layer (`StartUply`)**: Built with **.NET 8** following **Clean Architecture** principles (`Domain`, `Application`, `Infrastructure`, `Presentation`). Handles repository cloning, AI code processing via direct Google Gemini API, file parsing, and file compression.
+* **AI & Transformation Layer**: Integrates with Google's `gemini-3.5-flash-lite` model via Google AI Studio API (`https://generativelanguage.googleapis.com/v1beta/`) to process code transformations and format outputs using structured file delimiters (`---FILE: relative/path ---`).
 
 ```
 ┌────────────────────────────────────────────────────────┐
@@ -53,8 +53,8 @@ StartUply is architected as a decoupled full-stack application:
                │                          │
                ▼                          ▼
   ┌────────────────────────┐  ┌────────────────────────┐
-  │ OpenRouter AI Engine   │  │   Git Repo Processing  │
-  │ (Gemini 2.0 Flash)     │  │   (LibGit2Sharp)       │
+  │  Google Gemini 2.0 API │  │   Git Repo Processing  │
+  │ (GenerativeLanguage)   │  │   (LibGit2Sharp)       │
   └────────────────────────┘  └────────────────────────┘
 ```
 
@@ -69,7 +69,7 @@ StartUply is architected as a decoupled full-stack application:
 | **Framework** | .NET 8 / C# | Core Web API server |
 | **Architecture** | Clean Architecture | Layer separation (`Presentation`, `Infrastructure`, `Application`, `Domain`) |
 | **Git Engine** | `LibGit2Sharp` | In-memory and disk cloning for public/private Git repositories |
-| **AI Integration** | `HttpClient` + OpenRouter API | Integration with `google/gemini-2.0-flash-exp:free` model |
+| **AI Integration** | `HttpClient` + Google Gemini API | Integration with `gemini-3.5-flash-lite` model via Google AI Studio |
 | **Real-Time Engine** | ASP.NET Core SignalR | WebSocket streaming hub for task execution progress |
 | **API Documentation**| Swagger / OpenAPI | Endpoints exploration in development |
 | **Containerization** | Docker (Multi-stage build) | Deployment-ready container targeting Render/Cloud hosts |
@@ -100,7 +100,7 @@ StartUply Solution
 │       └── IRepository.cs
 ├── StartUply.Infrastructure
 │   └── Persistence/
-│       ├── AIService.cs (OpenRouter API client with retries)
+│       ├── AIService.cs (Google Gemini API client with retries)
 │       └── Repository.cs
 └── StartUply.Presentation
     ├── Controllers/ProjectController.cs (REST endpoints)
@@ -151,7 +151,7 @@ StartUply_UI Solution
 
 ---
 
-### AI Integration & Prompt Parsing (OpenRouter / Gemini)
+### AI Integration & Prompt Parsing (Google Gemini API)
 
 The application instructs the AI model to return multi-file outputs formatted with standardized delimiters:
 
@@ -356,7 +356,7 @@ Defined in `src/app/globals.css`:
 
 ### Backend Environment Variables
 
-- `OpenRouter:ApiKey`: Secret key for OpenRouter API access (configured in `appsettings.json` or environment variables).
+- `Gemini:ApiKey`: Secret key for Google AI Studio API access (configured in `appsettings.json` or `Gemini__ApiKey` environment variable).
 - `PORT`: Server port binding (default: `8080`, automatically supplied on Render).
 
 ### Frontend Environment Variables
