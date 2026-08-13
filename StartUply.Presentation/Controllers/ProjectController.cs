@@ -229,15 +229,13 @@ namespace StartUply.Presentation.Controllers
             var stream = System.IO.File.OpenRead(zipPath);
             var result = File(stream, "application/zip", "project.zip");
 
-            // Clean up after response
+            // Clean up zip after response
             Response.OnCompleted(() =>
             {
                 try
                 {
                     stream.Dispose();
                     System.IO.File.Delete(zipPath);
-                    Directory.Delete(project.Path, true);
-                    _projects.TryRemove(id, out _);
                 }
                 catch { }
                 return Task.CompletedTask;
@@ -497,6 +495,110 @@ namespace StartUply.Presentation.Controllers
                    message.Contains("permission denied") ||
                    message.Contains("auth");
         }
+
+        [HttpPost("pushToGithub")]
+        public async Task<IActionResult> PushToGithub([FromBody] PushToGithubRequest request)
+        {
+            if (!_projects.TryGetValue(request.Id, out var project))
+            {
+                return NotFound(new { error = "Project session not found or expired." });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.GithubToken))
+            {
+                return BadRequest(new { error = "GitHub Personal Access Token is required." });
+            }
+
+            if (string.IsNullOrWhiteSpace(request.RepoName))
+            {
+                return BadRequest(new { error = "Repository name is required." });
+            }
+
+            try
+            {
+                var progressCallback = CreateProgressCallback(Guid.NewGuid().ToString(), request.ConnectionId);
+                progressCallback?.Invoke("Creating GitHub repository...", 20);
+
+                using var httpClient = new HttpClient();
+                httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("StartUply-App");
+                httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", request.GithubToken);
+
+                var createRepoPayload = new
+                {
+                    name = request.RepoName,
+                    @private = request.IsPrivate,
+                    description = request.Description ?? "Created with TranspileAI / StartUply",
+                    auto_init = false
+                };
+
+                var response = await httpClient.PostAsJsonAsync("https://api.github.com/user/repos", createRepoPayload);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    return BadRequest(new { error = $"Failed to create GitHub repository: {response.StatusCode} - {errorContent}" });
+                }
+
+                var repoResponse = await response.Content.ReadFromJsonAsync<GithubRepoResponse>();
+                var cloneUrl = repoResponse?.clone_url ?? $"https://github.com/{request.RepoName}.git";
+                var htmlUrl = repoResponse?.html_url ?? $"https://github.com/{request.RepoName}";
+
+                progressCallback?.Invoke("Initializing local git repository...", 50);
+
+                var gitDir = Path.Combine(project.Path, ".git");
+                if (!Directory.Exists(gitDir))
+                {
+                    Repository.Init(project.Path);
+                }
+
+                using (var repo = new Repository(project.Path))
+                {
+                    progressCallback?.Invoke("Staging files and committing...", 70);
+
+                    Commands.Stage(repo, "*");
+
+                    var author = new Signature("TranspileAI", "transpileai@startuply.com", DateTimeOffset.Now);
+
+                    if (repo.RetrieveStatus().IsDirty)
+                    {
+                        repo.Commit("Initial commit from TranspileAI", author, author);
+                    }
+
+                    progressCallback?.Invoke("Pushing code to GitHub...", 85);
+
+                    if (repo.Network.Remotes["origin"] != null)
+                    {
+                        repo.Network.Remotes.Update("origin", r => r.Url = cloneUrl);
+                    }
+                    else
+                    {
+                        repo.Network.Remotes.Add("origin", cloneUrl);
+                    }
+
+                    var branch = repo.Head;
+
+                    var options = new PushOptions
+                    {
+                        CredentialsProvider = (_url, _user, _cred) =>
+                            new UsernamePasswordCredentials
+                            {
+                                Username = "x-access-token",
+                                Password = request.GithubToken
+                            }
+                    };
+
+                    repo.Network.Push(branch, options);
+                }
+
+                progressCallback?.Invoke("Repository created and code pushed successfully!", 100);
+
+                return Ok(new { success = true, repoUrl = htmlUrl, cloneUrl });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
     }
 
     public class CloneRequest
@@ -560,5 +662,21 @@ namespace StartUply.Presentation.Controllers
         public string Type { get; set; } // "directory" or "file"
         public string Path { get; set; }
         public List<DirectoryItem> Children { get; set; }
+    }
+
+    public class PushToGithubRequest
+    {
+        public string Id { get; set; }
+        public string RepoName { get; set; }
+        public bool IsPrivate { get; set; }
+        public string? Description { get; set; }
+        public string GithubToken { get; set; }
+        public string? ConnectionId { get; set; }
+    }
+
+    public class GithubRepoResponse
+    {
+        public string? html_url { get; set; }
+        public string? clone_url { get; set; }
     }
 }
