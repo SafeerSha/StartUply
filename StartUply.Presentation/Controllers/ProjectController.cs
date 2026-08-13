@@ -12,6 +12,11 @@ public class AuthenticationRequiredException : Exception
     public AuthenticationRequiredException(string message) : base(message) { }
 }
 
+public class InvalidCredentialsException : Exception
+{
+    public InvalidCredentialsException(string message) : base(message) { }
+}
+
 namespace StartUply.Presentation.Controllers
 {
     [ApiController]
@@ -72,18 +77,24 @@ namespace StartUply.Presentation.Controllers
 
                 return Ok(new { structure });
             }
-            catch (AuthenticationRequiredException)
+            catch (AuthenticationRequiredException ex)
             {
-                // Clean up on error
                 if (tempDir != null && Directory.Exists(tempDir))
                 {
                     Directory.Delete(tempDir, true);
                 }
-                return StatusCode(401, new { error = "Authentication required for this repository. Please provide username and password or personal access token." });
+                return StatusCode(401, new { error = ex.Message });
+            }
+            catch (InvalidCredentialsException ex)
+            {
+                if (tempDir != null && Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, true);
+                }
+                return BadRequest(new { error = ex.Message });
             }
             catch (Exception ex)
             {
-                // Clean up on error
                 if (tempDir != null && Directory.Exists(tempDir))
                 {
                     Directory.Delete(tempDir, true);
@@ -368,6 +379,10 @@ namespace StartUply.Presentation.Controllers
             {
                 return StatusCode(401, new { error = ex.Message });
             }
+            catch (InvalidCredentialsException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { error = ex.Message });
@@ -478,17 +493,24 @@ namespace StartUply.Presentation.Controllers
 
                 if (!string.IsNullOrEmpty(effectiveUser) && !string.IsNullOrEmpty(effectivePass))
                 {
-                    var cloneOptions = new CloneOptions(new FetchOptions
+                    try
                     {
-                        CredentialsProvider = (_url, _user, _cred) =>
-                            new UsernamePasswordCredentials { Username = effectiveUser, Password = effectivePass }
-                    });
-                    Repository.Clone(url, path, cloneOptions);
+                        var cloneOptions = new CloneOptions(new FetchOptions
+                        {
+                            CredentialsProvider = (_url, _user, _cred) =>
+                                new UsernamePasswordCredentials { Username = effectiveUser, Password = effectivePass }
+                        });
+                        Repository.Clone(url, path, cloneOptions);
+                    }
+                    catch (LibGit2SharpException retryEx)
+                    {
+                        throw new InvalidCredentialsException($"Authentication failed for private repository. Please verify that your Personal Access Token (PAT) is valid and has 'repo' scope. (Git details: {retryEx.Message})");
+                    }
                 }
                 else
                 {
                     // No credentials provided for private repo
-                    throw new AuthenticationRequiredException("This repository requires authentication. Please provide username and password or personal access token.");
+                    throw new AuthenticationRequiredException("This repository is private or requires authentication. Please provide a Personal Access Token (PAT).");
                 }
             }
         }
