@@ -4,6 +4,7 @@ using System.IO;
 using System.Collections.Concurrent;
 using System.IO.Compression;
 using StartUply.Application.Interfaces;
+using StartUply.Application.Common;
 using Microsoft.AspNetCore.SignalR;
 using StartUply.Presentation.Hubs;
 
@@ -290,7 +291,7 @@ namespace StartUply.Presentation.Controllers
                     var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
                     var project = _projects[projectId];
                     var code = ReadProjectCode(project.Path);
-                    var convertedCode = await _aiService.ConvertCodeAsync(code, request.FromFramework ?? "React", request.TargetFramework, progressCallback);
+                    var convertedCode = await _aiService.ConvertCodeAsync(code, request.FromFramework ?? "React", request.TargetFramework, progressCallback, request.AiApiKey);
                     var convertedFiles = ParseConvertedFiles(convertedCode);
                     var newId = Guid.NewGuid().ToString();
                     var newTempDir = Path.Combine(Path.GetTempPath(), newId);
@@ -320,7 +321,7 @@ namespace StartUply.Presentation.Controllers
                         var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
                         var project = _projects[projectId];
                         var frontendCode = ReadProjectCode(project.Path);
-                        var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetFramework, progressCallback);
+                        var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetFramework, progressCallback, request.AiApiKey);
                         var backendFiles = ParseConvertedFiles(backendCode);
                         var newId = Guid.NewGuid().ToString();
                         var newTempDir = Path.Combine(Path.GetTempPath(), newId);
@@ -345,7 +346,7 @@ namespace StartUply.Presentation.Controllers
                     {
                         var taskId = Guid.NewGuid().ToString();
                         var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
-                        var baseCode = await _aiService.GenerateBaseProjectAsync(request.TargetFramework, progressCallback);
+                        var baseCode = await _aiService.GenerateBaseProjectAsync(request.TargetFramework, progressCallback, request.AiApiKey);
                         var convertedFiles = ParseConvertedFiles(baseCode);
                         var id = Guid.NewGuid().ToString();
                         var tempDir = Path.Combine(Path.GetTempPath(), id);
@@ -384,8 +385,16 @@ namespace StartUply.Presentation.Controllers
             {
                 return BadRequest(new { error = ex.Message });
             }
+            catch (StartUply.Infrastructure.Services.GeminiRateLimitException ex)
+            {
+                return StatusCode(429, new { error = ex.Message, isRateLimit = true });
+            }
             catch (Exception ex)
             {
+                if (ex.Message.Contains("Rate limit", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("quota", StringComparison.OrdinalIgnoreCase))
+                {
+                    return StatusCode(429, new { error = "Gemini free tier rate limit reached. Please wait a moment or use your own Gemini API key (BYOK).", isRateLimit = true });
+                }
                 return BadRequest(new { error = ex.Message });
             }
         }
@@ -632,7 +641,8 @@ namespace StartUply.Presentation.Controllers
                     }
                     catch (LibGit2SharpException retryEx)
                     {
-                        throw new InvalidCredentialsException($"Authentication failed for private repository. Please verify that your Personal Access Token (PAT) is valid and has 'repo' scope. (Git details: {retryEx.Message})");
+                        var sanitizedMsg = SecurityUtils.MaskSecret(retryEx.Message);
+                        throw new InvalidCredentialsException($"Authentication failed for private repository. Please verify that your Personal Access Token (PAT) is valid and has 'repo' scope.");
                     }
                 }
                 else
@@ -804,6 +814,7 @@ namespace StartUply.Presentation.Controllers
         public string? ConnectionId { get; set; }
         public string? Username { get; set; }
         public string? Password { get; set; }
+        public string? AiApiKey { get; set; }
     }
 
     public class ProgressStatus
