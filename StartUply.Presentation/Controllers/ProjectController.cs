@@ -71,11 +71,12 @@ namespace StartUply.Presentation.Controllers
                 }
 
                 var structure = GetDirectoryStructure(repoDir);
+                var detectedTech = DetectTechStack(repoDir);
 
                 // Clean up immediately after getting structure
                 Directory.Delete(tempDir, true);
 
-                return Ok(new { structure });
+                return Ok(new { structure, detectedTech });
             }
             catch (AuthenticationRequiredException ex)
             {
@@ -442,6 +443,133 @@ namespace StartUply.Presentation.Controllers
             return relevantExtensions.Contains(extension.ToLower());
         }
 
+        private DetectedTechInfo DetectTechStack(string repoDir)
+        {
+            try
+            {
+                var files = Directory.GetFiles(repoDir, "*", SearchOption.AllDirectories)
+                    .Where(f => !f.Contains(".git") && !f.Contains("node_modules") && !f.Contains("bin") && !f.Contains("obj") && !f.Contains(".next"))
+                    .ToList();
+
+                // 1. Check Node / JS / TS ecosystem via package.json
+                var packageJsonFile = files.FirstOrDefault(f => Path.GetFileName(f).Equals("package.json", StringComparison.OrdinalIgnoreCase));
+                if (packageJsonFile != null)
+                {
+                    try
+                    {
+                        var content = System.IO.File.ReadAllText(packageJsonFile);
+                        if (content.Contains("\"next\""))
+                            return new DetectedTechInfo { Name = "Next.js", Category = "frontend", Confidence = "high", Summary = "Next.js Project" };
+                        if (content.Contains("\"nuxt\"") || content.Contains("\"@nuxt/"))
+                            return new DetectedTechInfo { Name = "Nuxt.js", Category = "frontend", Confidence = "high", Summary = "Nuxt.js Project" };
+                        if (content.Contains("\"@sveltejs/kit\""))
+                            return new DetectedTechInfo { Name = "SvelteKit", Category = "frontend", Confidence = "high", Summary = "SvelteKit Project" };
+                        if (content.Contains("\"@nestjs/core\""))
+                            return new DetectedTechInfo { Name = "NestJS", Category = "backend", Confidence = "high", Summary = "NestJS Backend" };
+                        if (content.Contains("\"express\""))
+                            return new DetectedTechInfo { Name = "Express", Category = "backend", Confidence = "high", Summary = "Express Backend" };
+                        if (content.Contains("\"fastify\""))
+                            return new DetectedTechInfo { Name = "Fastify", Category = "backend", Confidence = "high", Summary = "Fastify Backend" };
+                        if (content.Contains("\"hono\""))
+                            return new DetectedTechInfo { Name = "Hono", Category = "backend", Confidence = "high", Summary = "Hono Backend" };
+                        if (content.Contains("\"react\"") || content.Contains("\"react-dom\""))
+                            return new DetectedTechInfo { Name = "React", Category = "frontend", Confidence = "high", Summary = "React Project" };
+                        if (content.Contains("\"@angular/core\""))
+                            return new DetectedTechInfo { Name = "Angular", Category = "frontend", Confidence = "high", Summary = "Angular Project" };
+                        if (content.Contains("\"vue\""))
+                            return new DetectedTechInfo { Name = "Vue.js", Category = "frontend", Confidence = "high", Summary = "Vue.js Project" };
+                        if (content.Contains("\"svelte\""))
+                            return new DetectedTechInfo { Name = "Svelte", Category = "frontend", Confidence = "high", Summary = "Svelte Project" };
+                    }
+                    catch { }
+                }
+
+                // 2. Check Java / Kotlin / Spring Boot
+                if (files.Any(f => Path.GetFileName(f).Equals("pom.xml", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(f).Equals("build.gradle", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(f).Equals("build.gradle.kts", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var isSpring = files.Any(f => {
+                        if (Path.GetFileName(f).Equals("pom.xml", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(f).EndsWith(".gradle", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(f).EndsWith(".gradle.kts", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var text = System.IO.File.ReadAllText(f);
+                            return text.Contains("spring-boot") || text.Contains("springframework");
+                        }
+                        return false;
+                    });
+
+                    if (isSpring)
+                        return new DetectedTechInfo { Name = "Spring Boot", Category = "backend", Confidence = "high", Summary = "Spring Boot Backend" };
+
+                    return new DetectedTechInfo { Name = "Spring Boot", Category = "backend", Confidence = "medium", Summary = "Spring Boot Backend" };
+                }
+
+                // 3. Check C# / .NET / ASP.NET Core
+                if (files.Any(f => f.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".sln", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return new DetectedTechInfo { Name = ".NET / ASP.NET Core", Category = "backend", Confidence = "high", Summary = ".NET / ASP.NET Core Backend" };
+                }
+
+                // 4. Check Python (FastAPI, Django, Flask)
+                if (files.Any(f => Path.GetFileName(f).Equals("requirements.txt", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(f).Equals("Pipfile", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(f).Equals("pyproject.toml", StringComparison.OrdinalIgnoreCase)))
+                {
+                    foreach (var pyReq in files.Where(f => Path.GetFileName(f).Equals("requirements.txt", StringComparison.OrdinalIgnoreCase) || Path.GetFileName(f).Equals("pyproject.toml", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        try {
+                            var text = System.IO.File.ReadAllText(pyReq).ToLower();
+                            if (text.Contains("fastapi"))
+                                return new DetectedTechInfo { Name = "FastAPI", Category = "backend", Confidence = "high", Summary = "FastAPI Backend" };
+                            if (text.Contains("django"))
+                                return new DetectedTechInfo { Name = "Django", Category = "backend", Confidence = "high", Summary = "Django Project" };
+                            if (text.Contains("flask"))
+                                return new DetectedTechInfo { Name = "Flask", Category = "backend", Confidence = "high", Summary = "Flask Backend" };
+                        } catch {}
+                    }
+                    return new DetectedTechInfo { Name = "FastAPI", Category = "backend", Confidence = "medium", Summary = "Python Backend" };
+                }
+
+                // 5. Check PHP (Laravel, Symfony)
+                var composerJson = files.FirstOrDefault(f => Path.GetFileName(f).Equals("composer.json", StringComparison.OrdinalIgnoreCase));
+                if (composerJson != null)
+                {
+                    try {
+                        var text = System.IO.File.ReadAllText(composerJson).ToLower();
+                        if (text.Contains("laravel/framework"))
+                            return new DetectedTechInfo { Name = "Laravel", Category = "backend", Confidence = "high", Summary = "Laravel Backend" };
+                        if (text.Contains("symfony"))
+                            return new DetectedTechInfo { Name = "Symfony", Category = "backend", Confidence = "high", Summary = "Symfony Backend" };
+                    } catch {}
+                    return new DetectedTechInfo { Name = "Laravel", Category = "backend", Confidence = "medium", Summary = "PHP Backend" };
+                }
+
+                // 6. Check Ruby (Rails)
+                if (files.Any(f => Path.GetFileName(f).Equals("Gemfile", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return new DetectedTechInfo { Name = "Ruby on Rails", Category = "backend", Confidence = "high", Summary = "Ruby on Rails Backend" };
+                }
+
+                // 7. Check Go (Gin, Fiber, Echo)
+                if (files.Any(f => Path.GetFileName(f).Equals("go.mod", StringComparison.OrdinalIgnoreCase)))
+                {
+                    return new DetectedTechInfo { Name = "Gin", Category = "backend", Confidence = "medium", Summary = "Go Backend" };
+                }
+
+                // 8. Extension Fallback
+                if (files.Any(f => f.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)))
+                    return new DetectedTechInfo { Name = ".NET / ASP.NET Core", Category = "backend", Confidence = "medium", Summary = ".NET / ASP.NET Core Backend" };
+                if (files.Any(f => f.EndsWith(".java", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".kt", StringComparison.OrdinalIgnoreCase)))
+                    return new DetectedTechInfo { Name = "Spring Boot", Category = "backend", Confidence = "medium", Summary = "Spring Boot Backend" };
+                if (files.Any(f => f.EndsWith(".py", StringComparison.OrdinalIgnoreCase)))
+                    return new DetectedTechInfo { Name = "FastAPI", Category = "backend", Confidence = "medium", Summary = "Python Backend" };
+                if (files.Any(f => f.EndsWith(".tsx", StringComparison.OrdinalIgnoreCase) || f.EndsWith(".jsx", StringComparison.OrdinalIgnoreCase)))
+                    return new DetectedTechInfo { Name = "React", Category = "frontend", Confidence = "medium", Summary = "React Project" };
+
+                return new DetectedTechInfo { Name = "Unknown", Category = "general", Confidence = "low", Summary = "Unknown Tech" };
+            }
+            catch (Exception)
+            {
+                return new DetectedTechInfo { Name = "Unknown", Category = "general", Confidence = "low", Summary = "Unknown Tech" };
+            }
+        }
+
         private Dictionary<string, string> ParseConvertedFiles(string response)
         {
             var files = new Dictionary<string, string>();
@@ -707,5 +835,13 @@ namespace StartUply.Presentation.Controllers
     {
         public string? html_url { get; set; }
         public string? clone_url { get; set; }
+    }
+
+    public class DetectedTechInfo
+    {
+        public string Name { get; set; } = "Unknown";
+        public string Category { get; set; } = "general";
+        public string Confidence { get; set; } = "medium";
+        public string Summary { get; set; } = "";
     }
 }
