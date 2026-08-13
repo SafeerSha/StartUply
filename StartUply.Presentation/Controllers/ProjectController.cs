@@ -364,6 +364,10 @@ namespace StartUply.Presentation.Controllers
                     return BadRequest(new { error = "Invalid mode" });
                 }
             }
+            catch (AuthenticationRequiredException ex)
+            {
+                return StatusCode(401, new { error = ex.Message });
+            }
             catch (Exception ex)
             {
                 return BadRequest(new { error = ex.Message });
@@ -468,13 +472,16 @@ namespace StartUply.Presentation.Controllers
             }
             catch (LibGit2SharpException ex) when (IsAuthenticationError(ex))
             {
-                // If authentication failed and credentials are provided, retry with credentials
-                if (!string.IsNullOrEmpty(username) && !string.IsNullOrEmpty(password))
+                // If authentication failed, retry with credentials or Personal Access Token if provided
+                var effectiveUser = !string.IsNullOrEmpty(username) ? username : (!string.IsNullOrEmpty(password) ? "x-access-token" : null);
+                var effectivePass = !string.IsNullOrEmpty(password) ? password : username;
+
+                if (!string.IsNullOrEmpty(effectiveUser) && !string.IsNullOrEmpty(effectivePass))
                 {
                     var cloneOptions = new CloneOptions(new FetchOptions
                     {
                         CredentialsProvider = (_url, _user, _cred) =>
-                            new UsernamePasswordCredentials { Username = username, Password = password }
+                            new UsernamePasswordCredentials { Username = effectiveUser, Password = effectivePass }
                     });
                     Repository.Clone(url, path, cloneOptions);
                 }
