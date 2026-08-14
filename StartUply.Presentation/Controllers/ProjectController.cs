@@ -749,6 +749,8 @@ namespace StartUply.Presentation.Controllers
                         branch = repo.Branches.Rename(branch, "main");
                     }
 
+                    var remote = repo.Network.Remotes["origin"];
+
                     var options = new PushOptions
                     {
                         CredentialsProvider = (_url, _user, _cred) =>
@@ -759,7 +761,7 @@ namespace StartUply.Presentation.Controllers
                             }
                     };
 
-                    repo.Network.Push(branch, options);
+                    repo.Network.Push(remote, @"refs/heads/main:refs/heads/main", options);
 
                     repo.Branches.Update(branch,
                         b => b.Remote = "origin",
