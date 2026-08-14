@@ -35,6 +35,12 @@ namespace StartUply.Presentation.Controllers
             _hubContext = hubContext;
         }
 
+        [HttpGet("health")]
+        public IActionResult HealthCheck()
+        {
+            return Ok(new { status = "online", timestamp = DateTime.UtcNow });
+        }
+
         [HttpPost("clone")]
         public async Task<IActionResult> CloneRepo([FromBody] CloneRequest request)
         {
