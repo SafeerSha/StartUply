@@ -744,6 +744,11 @@ namespace StartUply.Presentation.Controllers
 
                     var branch = repo.Head;
 
+                    if (branch.FriendlyName != "main")
+                    {
+                        branch = repo.Branches.Rename(branch, "main");
+                    }
+
                     var options = new PushOptions
                     {
                         CredentialsProvider = (_url, _user, _cred) =>
@@ -755,6 +760,10 @@ namespace StartUply.Presentation.Controllers
                     };
 
                     repo.Network.Push(branch, options);
+
+                    repo.Branches.Update(branch,
+                        b => b.Remote = "origin",
+                        b => b.UpstreamBranch = branch.CanonicalName);
                 }
 
                 progressCallback?.Invoke("Repository created and code pushed successfully!", 100);
