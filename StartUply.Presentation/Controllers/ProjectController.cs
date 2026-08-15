@@ -273,66 +273,76 @@ namespace StartUply.Presentation.Controllers
             return NotFound(new { error = "Progress not found" });
         }
 
-        [HttpPost("process")]
-        public async Task<IActionResult> Process([FromBody] ProcessRequest request)
+        private void SetProgressComplete(string taskId, string projectId, string[] folders)
         {
-            try
+            var status = new ProgressStatus
             {
-                string? projectId = null;
-                if (!string.IsNullOrEmpty(request.GithubUrl))
-                {
-                    // Clone
-                    var id = Guid.NewGuid().ToString();
-                    var tempDir = Path.Combine(Path.GetTempPath(), id);
-                    CloneRepository(request.GithubUrl, tempDir, request.Username, request.Password);
-                    var folders = Directory.GetDirectories(tempDir).Select(Path.GetFileName).ToArray();
-                    _projects[id] = new ProjectData { Path = tempDir, Folders = folders, CreatedAt = DateTime.UtcNow };
-                    projectId = id;
-                }
+                Message = "Process completed successfully!",
+                Percentage = 100,
+                Timestamp = DateTime.UtcNow,
+                ProjectId = projectId,
+                Folders = folders
+            };
+            _progressStore[taskId] = status;
+        }
 
-                if (request.Mode == "conversion")
+        private void SetProgressError(string taskId, string errorMessage)
+        {
+            var status = new ProgressStatus
+            {
+                Message = errorMessage,
+                Percentage = 0,
+                Timestamp = DateTime.UtcNow,
+                Error = errorMessage
+            };
+            _progressStore[taskId] = status;
+        }
+
+        [HttpPost("process")]
+        public IActionResult Process([FromBody] ProcessRequest request)
+        {
+            var taskId = Guid.NewGuid().ToString();
+
+            _progressStore[taskId] = new ProgressStatus
+            {
+                Message = "Starting process...",
+                Percentage = 0,
+                Timestamp = DateTime.UtcNow
+            };
+
+            _ = Task.Run(async () =>
+            {
+                var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
+
+                try
                 {
-                    if (string.IsNullOrEmpty(projectId)) return BadRequest(new { error = "GithubUrl required for conversion" });
-                    var taskId = Guid.NewGuid().ToString();
-                    var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
-                    var project = _projects[projectId];
-                    var code = ReadProjectCode(project.Path);
-                    var convertedCode = await _aiService.ConvertCodeAsync(code, request.FromFramework ?? "React", request.TargetFramework, progressCallback, request.AiApiKey);
-                    var convertedFiles = ParseConvertedFiles(convertedCode);
-                    var newId = Guid.NewGuid().ToString();
-                    var newTempDir = Path.Combine(Path.GetTempPath(), newId);
-                    Directory.CreateDirectory(newTempDir);
-                    foreach (var kvp in convertedFiles)
+                    string? projectId = null;
+                    if (!string.IsNullOrEmpty(request.GithubUrl))
                     {
-                        var relativePath = kvp.Key;
-                        var content = kvp.Value;
-                        var fullPath = Path.Combine(newTempDir, relativePath);
-                        var dir = Path.GetDirectoryName(fullPath);
-                        if (!string.IsNullOrEmpty(dir))
-                        {
-                            Directory.CreateDirectory(dir);
-                        }
-                        System.IO.File.WriteAllText(fullPath, content);
+                        progressCallback("Cloning repository...", 5);
+                        var id = Guid.NewGuid().ToString();
+                        var tempDir = Path.Combine(Path.GetTempPath(), id);
+                        CloneRepository(request.GithubUrl, tempDir, request.Username, request.Password);
+                        var folders = Directory.GetDirectories(tempDir).Select(Path.GetFileName).ToArray();
+                        _projects[id] = new ProjectData { Path = tempDir, Folders = folders, CreatedAt = DateTime.UtcNow };
+                        projectId = id;
                     }
-                    var newFolders = Directory.GetDirectories(newTempDir).Select(Path.GetFileName).ToArray();
-                    _projects[newId] = new ProjectData { Path = newTempDir, Folders = newFolders, CreatedAt = DateTime.UtcNow };
-                    return Ok(new { projectId = newId, folders = newFolders, taskId });
-                }
-                else if (request.Mode == "generate")
-                {
-                    if (request.Type == "backend")
+
+                    if (request.Mode == "conversion")
                     {
-                        if (string.IsNullOrEmpty(projectId)) return BadRequest(new { error = "GithubUrl required for backend generation" });
-                        var taskId = Guid.NewGuid().ToString();
-                        var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
+                        if (string.IsNullOrEmpty(projectId))
+                        {
+                            SetProgressError(taskId, "GithubUrl required for conversion");
+                            return;
+                        }
                         var project = _projects[projectId];
-                        var frontendCode = ReadProjectCode(project.Path);
-                        var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetFramework, progressCallback, request.AiApiKey);
-                        var backendFiles = ParseConvertedFiles(backendCode);
+                        var code = ReadProjectCode(project.Path);
+                        var convertedCode = await _aiService.ConvertCodeAsync(code, request.FromFramework ?? "React", request.TargetFramework, progressCallback, request.AiApiKey);
+                        var convertedFiles = ParseConvertedFiles(convertedCode);
                         var newId = Guid.NewGuid().ToString();
                         var newTempDir = Path.Combine(Path.GetTempPath(), newId);
                         Directory.CreateDirectory(newTempDir);
-                        foreach (var kvp in backendFiles)
+                        foreach (var kvp in convertedFiles)
                         {
                             var relativePath = kvp.Key;
                             var content = kvp.Value;
@@ -346,63 +356,102 @@ namespace StartUply.Presentation.Controllers
                         }
                         var newFolders = Directory.GetDirectories(newTempDir).Select(Path.GetFileName).ToArray();
                         _projects[newId] = new ProjectData { Path = newTempDir, Folders = newFolders, CreatedAt = DateTime.UtcNow };
-                        return Ok(new { projectId = newId, folders = newFolders, taskId });
+
+                        SetProgressComplete(taskId, newId, newFolders);
                     }
-                    else if (request.Type == "frontend")
+                    else if (request.Mode == "generate")
                     {
-                        var taskId = Guid.NewGuid().ToString();
-                        var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
-                        var baseCode = await _aiService.GenerateBaseProjectAsync(request.TargetFramework, progressCallback, request.AiApiKey);
-                        var convertedFiles = ParseConvertedFiles(baseCode);
-                        var id = Guid.NewGuid().ToString();
-                        var tempDir = Path.Combine(Path.GetTempPath(), id);
-                        Directory.CreateDirectory(tempDir);
-                        foreach (var kvp in convertedFiles)
+                        if (request.Type == "backend")
                         {
-                            var relativePath = kvp.Key;
-                            var content = kvp.Value;
-                            var fullPath = Path.Combine(tempDir, relativePath);
-                            var dir = Path.GetDirectoryName(fullPath);
-                            if (!string.IsNullOrEmpty(dir))
+                            if (string.IsNullOrEmpty(projectId))
                             {
-                                Directory.CreateDirectory(dir);
+                                SetProgressError(taskId, "GithubUrl required for backend generation");
+                                return;
                             }
-                            System.IO.File.WriteAllText(fullPath, content);
+                            var project = _projects[projectId];
+                            var frontendCode = ReadProjectCode(project.Path);
+                            var backendCode = await _aiService.GenerateBackendAsync(frontendCode, request.TargetFramework, progressCallback, request.AiApiKey);
+                            var backendFiles = ParseConvertedFiles(backendCode);
+                            var newId = Guid.NewGuid().ToString();
+                            var newTempDir = Path.Combine(Path.GetTempPath(), newId);
+                            Directory.CreateDirectory(newTempDir);
+                            foreach (var kvp in backendFiles)
+                            {
+                                var relativePath = kvp.Key;
+                                var content = kvp.Value;
+                                var fullPath = Path.Combine(newTempDir, relativePath);
+                                var dir = Path.GetDirectoryName(fullPath);
+                                if (!string.IsNullOrEmpty(dir))
+                                {
+                                    Directory.CreateDirectory(dir);
+                                }
+                                System.IO.File.WriteAllText(fullPath, content);
+                            }
+                            var newFolders = Directory.GetDirectories(newTempDir).Select(Path.GetFileName).ToArray();
+                            _projects[newId] = new ProjectData { Path = newTempDir, Folders = newFolders, CreatedAt = DateTime.UtcNow };
+
+                            SetProgressComplete(taskId, newId, newFolders);
                         }
-                        var folders = Directory.GetDirectories(tempDir).Select(Path.GetFileName).ToArray();
-                        _projects[id] = new ProjectData { Path = tempDir, Folders = folders, CreatedAt = DateTime.UtcNow };
-                        return Ok(new { projectId = id, folders, taskId });
+                        else if (request.Type == "frontend")
+                        {
+                            var baseCode = await _aiService.GenerateBaseProjectAsync(request.TargetFramework, progressCallback, request.AiApiKey);
+                            var convertedFiles = ParseConvertedFiles(baseCode);
+                            var id = Guid.NewGuid().ToString();
+                            var tempDir = Path.Combine(Path.GetTempPath(), id);
+                            Directory.CreateDirectory(tempDir);
+                            foreach (var kvp in convertedFiles)
+                            {
+                                var relativePath = kvp.Key;
+                                var content = kvp.Value;
+                                var fullPath = Path.Combine(tempDir, relativePath);
+                                var dir = Path.GetDirectoryName(fullPath);
+                                if (!string.IsNullOrEmpty(dir))
+                                {
+                                    Directory.CreateDirectory(dir);
+                                }
+                                System.IO.File.WriteAllText(fullPath, content);
+                            }
+                            var folders = Directory.GetDirectories(tempDir).Select(Path.GetFileName).ToArray();
+                            _projects[id] = new ProjectData { Path = tempDir, Folders = folders, CreatedAt = DateTime.UtcNow };
+
+                            SetProgressComplete(taskId, id, folders);
+                        }
+                        else
+                        {
+                            SetProgressError(taskId, "Invalid type for generate");
+                        }
                     }
                     else
                     {
-                        return BadRequest(new { error = "Invalid type for generate" });
+                        SetProgressError(taskId, "Invalid mode");
                     }
                 }
-                else
+                catch (AuthenticationRequiredException ex)
                 {
-                    return BadRequest(new { error = "Invalid mode" });
+                    SetProgressError(taskId, ex.Message);
                 }
-            }
-            catch (AuthenticationRequiredException ex)
-            {
-                return StatusCode(401, new { error = ex.Message });
-            }
-            catch (InvalidCredentialsException ex)
-            {
-                return BadRequest(new { error = ex.Message });
-            }
-            catch (StartUply.Infrastructure.Services.GeminiRateLimitException ex)
-            {
-                return StatusCode(429, new { error = ex.Message, isRateLimit = true });
-            }
-            catch (Exception ex)
-            {
-                if (ex.Message.Contains("Rate limit", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("quota", StringComparison.OrdinalIgnoreCase))
+                catch (InvalidCredentialsException ex)
                 {
-                    return StatusCode(429, new { error = "Gemini free tier rate limit reached. Please wait a moment or use your own Gemini API key (BYOK).", isRateLimit = true });
+                    SetProgressError(taskId, ex.Message);
                 }
-                return BadRequest(new { error = ex.Message });
-            }
+                catch (StartUply.Infrastructure.Services.GeminiRateLimitException ex)
+                {
+                    SetProgressError(taskId, ex.Message);
+                }
+                catch (Exception ex)
+                {
+                    if (ex.Message.Contains("Rate limit", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("quota", StringComparison.OrdinalIgnoreCase))
+                    {
+                        SetProgressError(taskId, "Gemini free tier rate limit reached. Please wait a moment or use your own Gemini API key (BYOK).");
+                    }
+                    else
+                    {
+                        SetProgressError(taskId, ex.Message);
+                    }
+                }
+            });
+
+            return Ok(new { taskId });
         }
 
         private string ReadProjectCode(string path)
@@ -839,6 +888,9 @@ namespace StartUply.Presentation.Controllers
         public string Message { get; set; }
         public int Percentage { get; set; }
         public DateTime Timestamp { get; set; }
+        public string? ProjectId { get; set; }
+        public string[]? Folders { get; set; }
+        public string? Error { get; set; }
     }
 
     public class DirectoryItem
