@@ -44,6 +44,44 @@ namespace StartUply.Infrastructure.Services
             return result;
         }
 
+        public async Task<string> ConvertCodeChunksAsync(System.Collections.Generic.List<StartUply.Domain.Entities.ProjectChunk> chunks, string projectPath, string fromDomain, string toDomain, Action<string, int>? progressCallback = null, string? customAiApiKey = null)
+        {
+            var combinedOutput = new System.Text.StringBuilder();
+            var previousContext = new System.Text.StringBuilder();
+
+            int totalChunks = chunks.Count;
+            int currentChunkIdx = 0;
+
+            foreach(var chunk in chunks.OrderBy(c => c.Order))
+            {
+                currentChunkIdx++;
+                
+                var chunkCode = new System.Text.StringBuilder();
+                foreach(var file in chunk.FilePaths)
+                {
+                     chunkCode.AppendLine($"---FILE: {System.IO.Path.GetRelativePath(projectPath, file)} ---");
+                     chunkCode.AppendLine(System.IO.File.ReadAllText(file));
+                }
+
+                progressCallback?.Invoke($"Generating code for chunk {currentChunkIdx}/{totalChunks} ({chunk.Name})...", 20 + (60 * currentChunkIdx / totalChunks));
+                
+                var prompt = $"Convert this {fromDomain} project to {toDomain}. This is part {currentChunkIdx} of {totalChunks}. Focus on generating the {chunk.Name}. Provide the output as ---FILE: relative/path --- content for each file.\n\nContext from previously generated files:\n{previousContext}\n\nCode to convert:\n{chunkCode}";
+                
+                var result = await GenerateTextAsync(prompt, null, 0, 0, customAiApiKey);
+                combinedOutput.AppendLine(result);
+                
+                previousContext.AppendLine($"Files generated so far in chunk {chunk.Name}:");
+                var lines = result.Split('\n');
+                foreach(var line in lines) 
+                {
+                    if (line.StartsWith("---FILE:")) previousContext.AppendLine(line);
+                }
+            }
+            
+            progressCallback?.Invoke("Conversion completed.", 90);
+            return combinedOutput.ToString();
+        }
+
         public async Task<string> GenerateBackendAsync(string frontendCode, string targetDomain, Action<string, int>? progressCallback = null, string? customAiApiKey = null)
         {
             progressCallback?.Invoke("Analyzing frontend code...", 10);
@@ -135,26 +173,34 @@ namespace StartUply.Infrastructure.Services
 
                     return generatedText ?? "Error generating response from Gemini API";
                 }
-                catch (GeminiRateLimitException)
-                {
-                    throw; // Pass rate limit directly to controller
-                }
-                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
-                {
-                    throw new GeminiRateLimitException("Gemini free tier rate limit reached. Please wait a moment or use your own Gemini API key (BYOK).", ex);
-                }
                 catch (Exception ex)
                 {
                     retryCount++;
+                    bool isRateLimit = ex is GeminiRateLimitException || 
+                                       (ex is HttpRequestException httpEx && httpEx.StatusCode == System.Net.HttpStatusCode.TooManyRequests) ||
+                                       ex.Message.Contains("quota", StringComparison.OrdinalIgnoreCase) || 
+                                       ex.Message.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase) ||
+                                       ex.Message.Contains("429");
+
                     if (retryCount >= maxRetries)
                     {
-                        if (ex.Message.Contains("quota", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("RESOURCE_EXHAUSTED", StringComparison.OrdinalIgnoreCase))
+                        if (isRateLimit)
                         {
                             throw new GeminiRateLimitException("Gemini free tier rate limit reached. Please wait a moment or use your own Gemini API key (BYOK).", ex);
                         }
                         throw;
                     }
-                    progressCallback?.Invoke($"AI service warning, retrying in {delayMs}ms...", minProgress);
+                    
+                    if (isRateLimit)
+                    {
+                        delayMs = 15000 * retryCount; // 15s, 30s backoff
+                        progressCallback?.Invoke($"Rate limit hit. Cooling down for {delayMs/1000}s...", minProgress);
+                    }
+                    else
+                    {
+                        progressCallback?.Invoke($"AI service warning, retrying in {delayMs/1000}s...", minProgress);
+                    }
+                    
                     await Task.Delay(delayMs);
                 }
             }

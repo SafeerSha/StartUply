@@ -1,3 +1,6 @@
+using Hangfire;
+using Hangfire.MemoryStorage;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Configure port for Render deployment
@@ -11,6 +14,15 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
 
+// Add Hangfire services
+builder.Services.AddHangfire(configuration => configuration
+    .SetDataCompatibilityLevel(CompatibilityLevel.Version_180)
+    .UseSimpleAssemblyNameTypeSerializer()
+    .UseRecommendedSerializerSettings()
+    .UseMemoryStorage());
+
+builder.Services.AddHangfireServer();
+
 // Add CORS policy
 builder.Services.AddCors(options =>
 {
@@ -23,6 +35,7 @@ builder.Services.AddCors(options =>
 });
 
 builder.Services.AddHttpClient<StartUply.Application.Interfaces.IAIService, StartUply.Infrastructure.Services.AIService>();
+builder.Services.AddScoped<StartUply.Application.Interfaces.IProjectChunkerService, StartUply.Infrastructure.Services.ProjectChunkerService>();
 
 var app = builder.Build();
 
@@ -39,6 +52,8 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseCors("AllowAll");
+
+app.UseHangfireDashboard("/hangfire");
 
 app.MapControllers();
 app.MapHub<StartUply.Presentation.Hubs.ProgressHub>("/progressHub");
