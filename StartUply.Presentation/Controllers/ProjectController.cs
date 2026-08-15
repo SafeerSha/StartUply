@@ -263,6 +263,38 @@ namespace StartUply.Presentation.Controllers
             return result;
         }
 
+        [HttpGet("files/{id}")]
+        public IActionResult GetProjectFiles(string id)
+        {
+            if (!_projects.TryGetValue(id, out var project))
+            {
+                return NotFound(new { error = "Project session not found or expired." });
+            }
+
+            try
+            {
+                var filesDict = new Dictionary<string, string>();
+                var allFiles = Directory.GetFiles(project.Path, "*", SearchOption.AllDirectories);
+
+                foreach (var file in allFiles)
+                {
+                    var relativePath = Path.GetRelativePath(project.Path, file).Replace('\\', '/');
+
+                    // Skip git metadata or binary files
+                    if (relativePath.StartsWith(".git") || relativePath.EndsWith(".zip") || relativePath.EndsWith(".png") || relativePath.EndsWith(".jpg") || relativePath.EndsWith(".ico"))
+                        continue;
+
+                    filesDict["/" + relativePath] = System.IO.File.ReadAllText(file);
+                }
+
+                return Ok(new { success = true, files = filesDict });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
         [HttpGet("progress/{taskId}")]
         public IActionResult GetProgress(string taskId)
         {
