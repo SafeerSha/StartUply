@@ -7,6 +7,7 @@ using StartUply.Application.Interfaces;
 using StartUply.Application.Common;
 using Microsoft.AspNetCore.SignalR;
 using StartUply.Presentation.Hubs;
+using Hangfire;
 
 public class AuthenticationRequiredException : Exception
 {
@@ -28,11 +29,15 @@ namespace StartUply.Presentation.Controllers
         private static ConcurrentDictionary<string, ProgressStatus> _progressStore = new();
         private readonly IAIService _aiService;
         private readonly IHubContext<ProgressHub> _hubContext;
+        private readonly IBackgroundJobClient _backgroundJobClient;
+        private readonly IProjectChunkerService _chunkerService;
 
-        public ProjectController(IAIService aiService, IHubContext<ProgressHub> hubContext)
+        public ProjectController(IAIService aiService, IHubContext<ProgressHub> hubContext, IBackgroundJobClient backgroundJobClient, IProjectChunkerService chunkerService)
         {
             _aiService = aiService;
             _hubContext = hubContext;
+            _backgroundJobClient = backgroundJobClient;
+            _chunkerService = chunkerService;
         }
 
         [HttpGet("health")]
@@ -342,9 +347,16 @@ namespace StartUply.Presentation.Controllers
                 Timestamp = DateTime.UtcNow
             };
 
-            _ = Task.Run(async () =>
-            {
-                var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
+            // Enqueue the background job using Hangfire instead of Task.Run
+            _backgroundJobClient.Enqueue(() => ProcessBackgroundJob(taskId, request));
+
+            return Ok(new { taskId });
+        }
+
+        [NonAction]
+        public async Task ProcessBackgroundJob(string taskId, ProcessRequest request)
+        {
+            var progressCallback = CreateProgressCallback(taskId, request.ConnectionId);
 
                 try
                 {
@@ -368,8 +380,13 @@ namespace StartUply.Presentation.Controllers
                             return;
                         }
                         var project = _projects[projectId];
-                        var code = ReadProjectCode(project.Path);
-                        var convertedCode = await _aiService.ConvertCodeAsync(code, request.FromFramework ?? "React", request.TargetFramework, progressCallback, request.AiApiKey);
+                        
+                        progressCallback("Analyzing project structure and creating chunks...", 15);
+                        var chunks = _chunkerService.ChunkProject(project.Path, request.FromFramework ?? "React");
+                        
+                        progressCallback($"Created {chunks.Count} logical chunks for processing.", 20);
+
+                        var convertedCode = await _aiService.ConvertCodeChunksAsync(chunks, project.Path, request.FromFramework ?? "React", request.TargetFramework, progressCallback, request.AiApiKey);
                         var convertedFiles = ParseConvertedFiles(convertedCode);
                         var newId = Guid.NewGuid().ToString();
                         var newTempDir = Path.Combine(Path.GetTempPath(), newId);
@@ -481,9 +498,6 @@ namespace StartUply.Presentation.Controllers
                         SetProgressError(taskId, ex.Message);
                     }
                 }
-            });
-
-            return Ok(new { taskId });
         }
 
         private string ReadProjectCode(string path)
@@ -676,7 +690,14 @@ namespace StartUply.Presentation.Controllers
                 if (lines.Length >= 2)
                 {
                     var path = lines[0].Trim();
-                    var content = lines[1];
+                    
+                    // Aggressively remove any trailing hyphens, backticks, or spaces
+                    while (path.EndsWith("-") || path.EndsWith(" ") || path.EndsWith("`"))
+                    {
+                        path = path.Substring(0, path.Length - 1).Trim();
+                    }
+                    
+                    var content = lines[1].TrimStart('\r', '\n');
                     files[path] = content;
                 }
             }
