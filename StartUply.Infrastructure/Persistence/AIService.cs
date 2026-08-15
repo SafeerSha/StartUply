@@ -63,11 +63,13 @@ namespace StartUply.Infrastructure.Services
                      chunkCode.AppendLine(System.IO.File.ReadAllText(file));
                 }
 
-                progressCallback?.Invoke($"Generating code for chunk {currentChunkIdx}/{totalChunks} ({chunk.Name})...", 20 + (60 * currentChunkIdx / totalChunks));
+                int minProg = 20 + (60 * (currentChunkIdx - 1) / totalChunks);
+                int maxProg = 20 + (60 * currentChunkIdx / totalChunks);
+                progressCallback?.Invoke($"Generating code for chunk {currentChunkIdx}/{totalChunks} ({chunk.Name})...", minProg);
                 
                 var prompt = $"Convert this {fromDomain} project to {toDomain}. This is part {currentChunkIdx} of {totalChunks}. Focus on generating the {chunk.Name}. Provide the output as ---FILE: relative/path --- content for each file.\n\nContext from previously generated files:\n{previousContext}\n\nCode to convert:\n{chunkCode}";
                 
-                var result = await GenerateTextAsync(prompt, null, 0, 0, customAiApiKey);
+                var result = await GenerateTextAsync(prompt, progressCallback, minProg, maxProg, customAiApiKey);
                 combinedOutput.AppendLine(result);
                 
                 previousContext.AppendLine($"Files generated so far in chunk {chunk.Name}:");
@@ -127,6 +129,30 @@ namespace StartUply.Infrastructure.Services
                 {
                     progressCallback?.Invoke($"Sending request to Gemini AI...{(retryCount > 0 ? $" (retry {retryCount})" : "")}", minProgress);
 
+                    using var cts = new System.Threading.CancellationTokenSource();
+                    var progressTask = System.Threading.Tasks.Task.Run(async () =>
+                    {
+                        if (progressCallback == null || minProgress >= maxProgress) return;
+                        
+                        int currentProgress = minProgress;
+                        int range = maxProgress - minProgress;
+                        
+                        while (!cts.IsCancellationRequested && currentProgress < maxProgress - 1)
+                        {
+                            try
+                            {
+                                await System.Threading.Tasks.Task.Delay(1500, cts.Token);
+                                if (!cts.IsCancellationRequested && currentProgress < maxProgress - 1)
+                                {
+                                    currentProgress += Math.Max(1, range / 20); // Steady small increments
+                                    if (currentProgress >= maxProgress) currentProgress = maxProgress - 1;
+                                    progressCallback.Invoke("Generating code...", currentProgress);
+                                }
+                            }
+                            catch (System.Threading.Tasks.TaskCanceledException) { break; }
+                        }
+                    });
+
                     var request = new
                     {
                         contents = new[]
@@ -148,6 +174,9 @@ namespace StartUply.Infrastructure.Services
 
                     var endpoint = $"models/{_modelId}:generateContent?key={effectiveKey}";
                     var response = await _httpClient.PostAsJsonAsync(endpoint, request);
+                    
+                    cts.Cancel();
+                    try { await progressTask; } catch { }
 
                     if (!response.IsSuccessStatusCode)
                     {
